@@ -9,6 +9,14 @@ const logger = require('../utils/logger'); // Ensure logger is available or hand
  */
 class DatabaseManager {
   constructor() {
+    // DEBUG: Log environment variables
+    console.log('🔍 DATABASE CONFIG DEBUG:');
+    console.log('DB_HOST:', process.env.DB_HOST || 'UNDEFINED');
+    console.log('DB_PORT:', process.env.DB_PORT || 'UNDEFINED');
+    console.log('DB_USER:', process.env.DB_USER || 'UNDEFINED');
+    console.log('DB_NAME:', process.env.DB_NAME || 'UNDEFINED');
+    console.log('DB_PASS:', process.env.DB_PASS ? '***HIDDEN***' : 'UNDEFINED');
+
     this.pool = new Pool({
       user: process.env.DB_USER,
       host: process.env.DB_HOST,
