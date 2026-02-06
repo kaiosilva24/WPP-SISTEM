@@ -37,18 +37,48 @@ No painel do DisCloud:
 Após o deploy, acesse:
 - **Dashboard:** https://wpp.discloud.app
 
-## ⚠️ Limitações do DisCloud
+## 🔧 Arquivos Importantes para DisCloud
 
-> **IMPORTANTE:** O DisCloud **NÃO SUPORTA** navegadores headless (Puppeteer/Chrome) nativamente.
-> 
-> O WhatsApp Web.js requer um navegador Chrome em execução, o que pode não funcionar no DisCloud.
-> 
-> **Alternativas recomendadas:**
-> 1. **VPS** (Oracle Cloud Free, DigitalOcean, Vultr) - Recomendado
-> 2. **Heroku** com buildpack de Chrome
-> 3. **Railway** com Docker
+O projeto inclui o arquivo `apt` que instala automaticamente o Chromium:
 
-## 🐳 Deploy em VPS (Recomendado)
+```
+apt (arquivo na raiz)
+├── chromium          # Navegador
+├── libnss3           # Biblioteca SSL
+├── libatk-bridge2.0-0
+├── libgtk-3-0
+├── libasound2
+├── libxss1
+└── libgbm1
+```
+
+O código detecta automaticamente quando está rodando em Linux e:
+- Usa `/usr/bin/chromium` como navegador
+- Força modo headless (sem interface gráfica)
+
+## 📁 Estrutura do Projeto
+
+```
+WPP-SISTEM/
+├── apt                # Instala Chromium no DisCloud
+├── discloud.config    # Configuração DisCloud (4GB RAM)
+├── backend/           # API Node.js + Socket.IO
+│   ├── src/
+│   │   ├── api/       # Rotas REST
+│   │   ├── services/  # WhatsApp Session, Message Handler
+│   │   ├── web/       # Express Server
+│   │   └── utils/     # Logger, helpers
+│   └── package.json
+├── frontend/          # React + Vite
+│   ├── src/
+│   ├── dist/          # Build de produção
+│   └── package.json
+└── data/              # Dados persistentes
+```
+
+## 🐳 Deploy Alternativo em VPS
+
+Se preferir usar VPS (Oracle Cloud Free, DigitalOcean):
 
 ```bash
 # Clone o repositório
@@ -66,24 +96,4 @@ nano .env  # Edite conforme necessário
 
 # Inicie
 cd backend && npm start
-```
-
-## 📁 Estrutura do Projeto
-
-```
-WPP-SISTEM/
-├── backend/           # API Node.js + Socket.IO
-│   ├── src/
-│   │   ├── api/       # Rotas REST
-│   │   ├── services/  # WhatsApp Session, Message Handler
-│   │   ├── web/       # Express Server
-│   │   └── utils/     # Logger, helpers
-│   └── package.json
-├── frontend/          # React + Vite
-│   ├── src/
-│   ├── dist/          # Build de produção
-│   └── package.json
-├── data/              # Dados persistentes
-├── discloud.config    # Configuração DisCloud
-└── docker-compose.yml # Deploy Docker
 ```

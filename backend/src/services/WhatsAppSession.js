@@ -135,7 +135,13 @@ class WhatsAppSession extends EventEmitter {
                 }),
                 requestTimeout: 60000,
                 puppeteer: {
-                    headless: !startVisible,
+                    // Em produção (DisCloud/Linux), usa Chromium do sistema e força headless
+                    ...(process.platform === 'linux' ? {
+                        executablePath: '/usr/bin/chromium',
+                        headless: true  // Obrigatório em servidor
+                    } : {
+                        headless: !startVisible  // Local pode ser visível
+                    }),
                     bypassCSP: true,
                     args: [
                         '--no-sandbox',
