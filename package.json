@@ -2,11 +2,10 @@
   "name": "whatsapp-warming-system",
   "version": "2.0.0",
   "description": "Sistema de aquecimento de WhatsApp com gerenciamento dinâmico de contas",
-  "main": "backend/src/index.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node backend/src/index.js",
-    "dev": "node backend/src/index.js",
-    "postinstall": "cd backend && npm install",
+    "start": "node index.js",
+    "dev": "node index.js",
     "test": "echo \"Sistema de Aquecimento WhatsApp\" && exit 0"
   },
   "keywords": [
