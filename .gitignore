@@ -3,7 +3,7 @@ node_modules/
 package-lock.json
 
 # Ambiente
-.env
+# .env  # Commented out for DisCloud - needs .env in repo
 
 # Sessões autenticadas (IMPORTANTE: Faça backup!)
 .wwebjs_auth/
