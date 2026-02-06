@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 const path = require('path');
 const fs = require('fs');
-require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
+// dotenv will be loaded by index.js - DisCloud uses system env vars
 const logger = require('../utils/logger'); // Ensure logger is available or handle referencing
 
 /**
