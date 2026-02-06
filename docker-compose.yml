@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  whatsapp-warming:
+    build: .
+    container_name: whatsapp-warming
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./.wwebjs_auth:/app/.wwebjs_auth
+      - ./media:/app/media
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    networks:
+      - whatsapp-network
+
+networks:
+  whatsapp-network:
+    driver: bridge
