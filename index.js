@@ -2,5 +2,5 @@
 process.env.NODE_PATH = __dirname + '/node_modules';
 require('module').Module._initPaths();
 
-// Inicia o backend
-require('./backend/src/index.js');
+// Inicia o servidor (agora em src/ na raiz)
+require('./src/index.js');

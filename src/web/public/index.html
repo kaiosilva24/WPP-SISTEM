@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Aquecimento WhatsApp v2.0</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-content">
+        <h1 class="title">
+          <span class="icon">🔥</span>
+          Sistema de Aquecimento WhatsApp
+          <span class="version">v2.0</span>
+        </h1>
+        <button class="btn btn-primary" onclick="showCreateAccountModal()">
+          <span>➕</span> Nova Conta
+        </button>
+      </div>
+    </header>
+
+    <!-- Global Stats -->
+    <section class="stats-section">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">📱</div>
+          <div class="stat-info">
+            <div class="stat-number" id="totalAccounts">0</div>
+            <div class="stat-label">Total de Contas</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">✅</div>
+          <div class="stat-info">
+            <div class="stat-number" id="activeSessions">0</div>
+            <div class="stat-label">Contas Ativas</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📤</div>
+          <div class="stat-info">
+            <div class="stat-number" id="totalMessagesSent">0</div>
+            <div class="stat-label">Mensagens Enviadas</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">👥</div>
+          <div class="stat-info">
+            <div class="stat-number" id="totalUniqueContacts">0</div>
+            <div class="stat-label">Contatos Únicos</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Accounts Grid -->
+    <section class="accounts-section">
+      <h2 class="section-title">Contas WhatsApp</h2>
+      <div class="accounts-grid" id="accountsGrid">
+        <div class="empty-state">
+          <div class="empty-icon">📱</div>
+          <h3>Nenhuma conta criada</h3>
+          <p>Clique em "Nova Conta" para começar</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Modal: Criar Conta -->
+  <div id="createAccountModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Nova Conta WhatsApp</h2>
+        <button class="modal-close" onclick="closeModal('createAccountModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Nome da Conta</label>
+          <input type="text" id="accountName" placeholder="Ex: Conta 1, Vendas, Suporte..." class="form-input">
+          <small>Escolha um nome único para identificar esta conta</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('createAccountModal')">Cancelar</button>
+        <button class="btn btn-primary" onclick="createAccount()">Criar Conta</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Configurar Conta -->
+  <div id="configAccountModal" class="modal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Configurar Conta: <span id="configAccountName"></span></h2>
+        <button class="modal-close" onclick="closeModal('configAccountModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs">
+          <button class="tab-btn active" onclick="switchTab('proxy')">Proxy</button>
+          <button class="tab-btn" onclick="switchTab('delays')">Delays</button>
+          <button class="tab-btn" onclick="switchTab('messages')">Mensagens</button>
+          <button class="tab-btn" onclick="switchTab('media')">Mídia</button>
+        </div>
+
+        <!-- Tab: Proxy -->
+        <div id="tab-proxy" class="tab-content active">
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="proxyEnabled">
+              <span>Usar Proxy</span>
+            </label>
+          </div>
+          <div id="proxyFields" style="display: none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label>IP do Proxy</label>
+                <input type="text" id="proxyIp" placeholder="192.168.1.1" class="form-input">
+              </div>
+              <div class="form-group">
+                <label>Porta</label>
+                <input type="number" id="proxyPort" placeholder="8080" class="form-input">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Usuário (opcional)</label>
+                <input type="text" id="proxyUsername" placeholder="usuario" class="form-input">
+              </div>
+              <div class="form-group">
+                <label>Senha (opcional)</label>
+                <input type="password" id="proxyPassword" placeholder="senha" class="form-input">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Delays -->
+        <div id="tab-delays" class="tab-content">
+          <div class="form-group">
+            <label>Delay de Leitura (ms)</label>
+            <div class="form-row">
+              <input type="number" id="minReadDelay" placeholder="Mínimo" class="form-input">
+              <input type="number" id="maxReadDelay" placeholder="Máximo" class="form-input">
+            </div>
+            <small>Tempo que leva para "ler" a mensagem (padrão: 3000-15000ms)</small>
+          </div>
+          <div class="form-group">
+            <label>Delay de Digitação (ms)</label>
+            <div class="form-row">
+              <input type="number" id="minTypingDelay" placeholder="Mínimo" class="form-input">
+              <input type="number" id="maxTypingDelay" placeholder="Máximo" class="form-input">
+            </div>
+            <small>Tempo que leva para "digitar" (padrão: 5000-20000ms)</small>
+          </div>
+          <div class="form-group">
+            <label>Delay de Resposta (ms)</label>
+            <div class="form-row">
+              <input type="number" id="minResponseDelay" placeholder="Mínimo" class="form-input">
+              <input type="number" id="maxResponseDelay" placeholder="Máximo" class="form-input">
+            </div>
+            <small>Tempo entre terminar de digitar e enviar (padrão: 10000-30000ms)</small>
+          </div>
+          <div class="form-group">
+            <label>Intervalo Mínimo entre Mensagens (ms)</label>
+            <input type="number" id="minMessageInterval" placeholder="20000" class="form-input">
+            <small>Tempo mínimo entre mensagens para o mesmo contato (padrão: 20000ms)</small>
+          </div>
+          <div class="form-group">
+            <label>Probabilidade de Ignorar (%)</label>
+            <input type="number" id="ignoreProbability" min="0" max="100" placeholder="20" class="form-input">
+            <small>Chance de não responder imediatamente (padrão: 20%)</small>
+          </div>
+        </div>
+
+        <!-- Tab: Mensagens -->
+        <div id="tab-messages" class="tab-content">
+          <div class="messages-section">
+            <h3>Mensagens Personalizadas</h3>
+            <p>Use {nome} para incluir o nome do contato e {grupo} para nome do grupo</p>
+
+            <div class="form-group">
+              <label>Tipo de Mensagem</label>
+              <select id="messageType" class="form-input">
+                <option value="first">Primeira Resposta</option>
+                <option value="followup">Resposta Subsequente</option>
+                <option value="group">Saudação de Grupo</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Texto da Mensagem</label>
+              <textarea id="messageText" rows="3" placeholder="Ex: Oi {nome}! Tudo bem?" class="form-input"></textarea>
+            </div>
+
+            <button class="btn btn-primary btn-sm" onclick="addCustomMessage()">
+              <span>➕</span> Adicionar Mensagem
+            </button>
+
+            <div id="messagesList" class="messages-list">
+              <!-- Mensagens serão listadas aqui -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Mídia -->
+        <div id="tab-media" class="tab-content">
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="mediaEnabled">
+              <span>Enviar Mídia</span>
+            </label>
+            <small>Alterna entre texto e mídia automaticamente</small>
+          </div>
+          <div class="form-group">
+            <label>Intervalo de Mídia</label>
+            <input type="number" id="mediaInterval" placeholder="2" class="form-input">
+            <small>Envia mídia a cada X mensagens (padrão: 2)</small>
+          </div>
+          <div class="info-box">
+            <strong>📁 Pasta de Mídia:</strong> ./media/<br>
+            Coloque imagens (.jpg, .png), vídeos (.mp4), áudios (.mp3) ou figurinhas (.webp) nesta pasta.
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('configAccountModal')">Cancelar</button>
+        <button class="btn btn-primary" onclick="saveAccountConfig()">Salvar Configurações</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>
