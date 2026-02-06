@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node backend/src/index.js",
     "dev": "node backend/src/index.js",
+    "postinstall": "cd backend && npm install",
     "test": "echo \"Sistema de Aquecimento WhatsApp\" && exit 0"
   },
   "keywords": [
