@@ -130,8 +130,9 @@ class WhatsAppSession extends EventEmitter {
             const clientConfig = {
                 authStrategy: new LocalAuth({
                     clientId: `account-${this.accountId}`,
-                    // Usando caminho fora do OneDrive para evitar bloqueios e erros de path
-                    dataPath: path.join(process.env.USERPROFILE, '.wwebjs_auth_aquecimento')
+                    // Usando caminho correto para cada sistema operacional
+                    // Linux (DisCloud): HOME, Windows: USERPROFILE
+                    dataPath: path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.wwebjs_auth_aquecimento')
                 }),
                 requestTimeout: 60000,
                 puppeteer: {
