@@ -60,9 +60,18 @@ class WebServer {
         this.app.use(express.json());
 
         // Serve arquivos estáticos do frontend (produção)
-        const frontendPath = path.join(__dirname, '..', '..', '..', 'frontend', 'dist');
-        this.app.use(express.static(frontendPath));
+        // Path: from src/web/ up to root, then frontend/dist
+        const frontendPath = path.join(__dirname, '..', '..', 'frontend', 'dist');
         logger.info(null, `📂 Servindo arquivos estáticos de: ${frontendPath}`);
+
+        // Verifica se o diretório existe
+        const fs = require('fs');
+        if (fs.existsSync(frontendPath)) {
+            this.app.use(express.static(frontendPath));
+            logger.info(null, `✅ Frontend encontrado!`);
+        } else {
+            logger.warn(null, `⚠️ Frontend não encontrado em: ${frontendPath}`);
+        }
     }
 
     /**
@@ -129,7 +138,7 @@ class WebServer {
         this.app.get('*', (req, res) => {
             // Se não é uma rota de API, serve o frontend
             if (!req.path.startsWith('/api') && !req.path.startsWith('/socket.io')) {
-                const frontendPath = path.join(__dirname, '..', '..', '..', 'frontend', 'dist', 'index.html');
+                const frontendPath = path.join(__dirname, '..', '..', 'frontend', 'dist', 'index.html');
                 res.sendFile(frontendPath);
             }
         });
