@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const logger = require('./utils/logger');
 const sessionManager = require('./services/SessionManager');
 const messageHandler = require('./services/MessageHandler');
