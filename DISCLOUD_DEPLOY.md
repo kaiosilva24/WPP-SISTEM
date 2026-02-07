@@ -30,12 +30,12 @@ NODE_ENV=production
 
 No painel do DisCloud:
 1. Vá em **Configurações > Domínio**
-2. Ative para usar: `wpp.discloud.app`
+2. Ative para usar: `wpp-aquecimento.discloud.app`
 
 ### 4. Acesse o sistema
 
 Após o deploy, acesse:
-- **Dashboard:** https://wpp.discloud.app
+- **Dashboard:** https://wpp-aquecimento.discloud.app
 
 ## 🔧 Arquivos Importantes para DisCloud
 
