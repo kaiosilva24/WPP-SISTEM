@@ -41,9 +41,7 @@ class WebServer {
             process.env.FRONTEND_URL || 'http://localhost:5173',
             'http://localhost:3000',
             'https://wpp.discloud.app',
-            'http://wpp.discloud.app',
-            'https://wpp-aquecimento.discloud.app',
-            'http://wpp-aquecimento.discloud.app'
+            'https://wpp-aquecimento.discloud.app'
         ];
 
         this.app.use(cors({
