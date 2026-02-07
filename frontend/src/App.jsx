@@ -2,8 +2,17 @@ import { useEffect, useState } from 'react'
 import io from 'socket.io-client'
 import './App.css'
 
+// Detecta a URL do backend dinamicamente
+// Em produção, usa a mesma origem da página (DisCloud)
+// Em desenvolvimento local, usa localhost:3000
+const API_URL = window.location.hostname === 'localhost'
+    ? 'http://localhost:3000'
+    : window.location.origin;
+
+console.log('🌐 API URL:', API_URL);
+
 // Conecta ao backend via Socket.IO
-const socket = io('http://localhost:3000');
+const socket = io(API_URL);
 
 function App() {
     const [accounts, setAccounts] = useState([]);
