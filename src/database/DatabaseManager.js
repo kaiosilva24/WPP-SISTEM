@@ -9,21 +9,24 @@ const logger = require('../utils/logger'); // Ensure logger is available or hand
  */
 class DatabaseManager {
   constructor() {
-    // DEBUG: Log environment variables
-    console.log('🔍 DATABASE CONFIG DEBUG:');
-    console.log('DB_HOST:', process.env.DB_HOST || 'UNDEFINED');
-    console.log('DB_PORT:', process.env.DB_PORT || 'UNDEFINED');
-    console.log('DB_USER:', process.env.DB_USER || 'UNDEFINED');
-    console.log('DB_NAME:', process.env.DB_NAME || 'UNDEFINED');
-    console.log('DB_PASS:', process.env.DB_PASS ? '***HIDDEN***' : 'UNDEFINED');
+    // Fallback values for DisCloud (when .env doesn't load properly)
+    const dbConfig = {
+      user: process.env.DB_USER || 'admin',
+      host: process.env.DB_HOST || '129.80.149.224',
+      database: process.env.DB_NAME || 'whatsapp_warming',
+      password: process.env.DB_PASS || 'SecurePass_WhatsApp_2026!',
+      port: parseInt(process.env.DB_PORT) || 8080,
+    };
 
-    this.pool = new Pool({
-      user: process.env.DB_USER,
-      host: process.env.DB_HOST,
-      database: process.env.DB_NAME,
-      password: process.env.DB_PASS,
-      port: process.env.DB_PORT || 5432,
-    });
+    // DEBUG: Log configuration
+    console.log('🔍 DATABASE CONFIG:');
+    console.log('   HOST:', dbConfig.host);
+    console.log('   PORT:', dbConfig.port);
+    console.log('   USER:', dbConfig.user);
+    console.log('   DB:', dbConfig.database);
+    console.log('   PASS:', dbConfig.password ? '***SET***' : 'MISSING');
+
+    this.pool = new Pool(dbConfig);
 
     this.pool.on('error', (err, client) => {
       console.error('Unexpected error on idle client', err);
