@@ -1,0 +1,39 @@
+﻿
+  <rejected> Error: 
+      at rewriteError 
+(C:\Use
+} reason: Error: 
+Execution 
+    at rewriteError 
+(C:\Users
+[90m2026-02-23 
+12:33:55[0m 
+[31m[SYSTEM][0m 
+Unhandled Rejection: 
+Error: Error: EBUSY: 
+resource busy or 
+locked, unlink 'C:\User
+s\kaiob\.wwebjs_auth_aq
+uecimento\session-accou
+nt-12\lockfile'
+  <rejected> Error: 
+Error: 
+} reason: Error: 
+Error: 
+[90m2026-02-23 
+12:33:56[0m 
+[31m[SYSTEM][0m 
+Unhandled Rejection: 
+Error: Error: EBUSY: 
+resource busy or 
+locked, unlink 'C:\User
+s\kaiob\.wwebjs_auth_aq
+uecimento\session-accou
+nt-12\first_party_sets.
+db'
+  <rejected> Error: 
+Error: 
+} reason: Error: 
+Error: 
+
+

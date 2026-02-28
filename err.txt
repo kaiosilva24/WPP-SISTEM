@@ -1,0 +1,42 @@
+﻿node : C:\Users\kaiob
+\Downloads\WPP-SISTEM
+-main (1)\WPP-SISTEM-
+main\src\services\Mes
+sageHandler.js:460
+No linha:1 
+caractere:6
++ $r = node --check "
+src/services/MessageH
+andler.js" 2>&1 | 
+Out-String; ...
++      ~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (C:\User   
+ s\kaiob\...eHand    
+ler.js:460:Strin    
+g) [], RemoteExc    
+eption
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+                    
+} catch (playedErr) {
+                     
+ ^^^^^
+
+SyntaxError: 
+Unexpected token 
+'catch'
+    at wrapSafe (node
+:internal/modules/cjs
+/loader:1662:18)
+    at checkSyntax (n
+ode:internal/main/che
+ck_syntax:78:3)
+
+Node.js v22.15.0
+

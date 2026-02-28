@@ -1,0 +1,233 @@
+﻿­ƒöì DATABASE CONFIG:
+   HOST: 129.80.149.224
+   PORT: 8080
+   USER: admin
+   DB: whatsapp_warming
+   PASS: ***SET***
+[ffmpeg] Ô£à Bin├írio encontrado: C:\Users\kaiob\Downloads\WPP-SISTEM-main (1)\WPP-SISTEM-main\node_modules\@ffmpeg-installer\win32-x64\ffmpeg.exe
+
+============================================================
+­ƒöÑ SISTEMA DE AQUECIMENTO WHATSAPP v2.0
+============================================================
+
+[90m2026-02-24 13:58:00[0m [36m[SYSTEM][0m Inicializando banco de dados...
+Ô£à Database tables initialized (PostgreSQL)
+[90m2026-02-24 13:58:06[0m [36m[SYSTEM][0m Iniciando servidor backend API...
+[90m2026-02-24 13:58:06[0m [36m[SYSTEM][0m ­ƒôé Servindo arquivos est├íticos de: C:\Users\kaiob\Downloads\WPP-SISTEM-main (1)\WPP-SISTEM-main\frontend\dist
+[90m2026-02-24 13:58:06[0m [36m[SYSTEM][0m Ô£à Frontend encontrado!
+[90m2026-02-24 13:58:06[0m [32m[SYSTEM][0m ­ƒÜÇ Backend API rodando em http://localhost:3000
+[90m2026-02-24 13:58:06[0m [36m[SYSTEM][0m ­ƒöù CORS habilitado para: http://localhost:5173
+[90m2026-02-24 13:58:06[0m [36m[SYSTEM][0m ­ƒöÑ Auto-aquecimento agendado (verifica├º├úo a cada 60s)
+[90m2026-02-24 13:58:06[0m [36m[SYSTEM][0m Cliente conectado ao backend: lAcPvJf6ANT-GNGsAAAB
+[90m2026-02-24 13:58:06[0m [36m[SYSTEM][0m Encontradas 2 contas no banco de dados
+[90m2026-02-24 13:58:06[0m [36m[SYSTEM][0m ­ƒöä Retomando 2 sess├úo(├Áes) previamente conectadas...
+[90m2026-02-24 13:58:06[0m [36m[SYSTEM][0m   ÔûÂ Retomando sess├úo: 02 (ID: 13)...
+[90m2026-02-24 13:58:10[0m [36m[02][0m Validando proxy 157.151.26.190:3003...
+[90m2026-02-24 13:58:10[0m [36m[02][0m Validando proxy 157.151.26.190:3003...
+[90m2026-02-24 13:58:10[0m [36m[02][0m Proxy validado. IP Externo: 177.174.220.117 - ISP: Vivo
+[90m2026-02-24 13:58:10[0m [36m[02][0m Ô£à Proxy validado! IP: 177.174.220.117
+[90m2026-02-24 13:58:10[0m [36m[02][0m Criando proxy local an├┤nimo...
+[90m2026-02-24 13:58:10[0m [36m[02][0m Ô£à Proxy local criado: http://127.0.0.1:54989
+[90m2026-02-24 13:58:10[0m [36m[02][0m Iniciando cliente WhatsApp...
+[90m2026-02-24 13:58:12[0m [36m[02][0m ­ƒøí´©Å WebRTC Blocker ativo - IP protegido!
+[90m2026-02-24 13:58:16[0m [36m[SYSTEM][0m   ÔûÂ Retomando sess├úo: 01 (ID: 12)...
+[90m2026-02-24 13:58:18[0m [32m[02][0m Ô£à Autenticado com sucesso!
+[90m2026-02-24 13:58:18[0m [32m[02][0m ­ƒÜÇ WhatsApp pronto!
+[90m2026-02-24 13:58:18[0m [36m[02][0m Conectado como: kaio.suporte02 (5514982060312)
+[90m2026-02-24 13:58:18[0m [36m[02][0m ­ƒöï Modo Standby (Ocioso) ativado. Iniciando ciclos simulados...
+[90m2026-02-24 13:58:18[0m [36m[02][0m ­ƒöï Pr├│xima "espiadinha" ociosa (Standby) programada para daqui a 8 minutos.
+[90m2026-02-24 13:58:19[0m [36m[02][0m ÔÅ│ Aguardando sincroniza├º├úo de chats silenciosa do WhatsApp...
+[90m2026-02-24 13:58:19[0m [36m[01][0m Validando proxy 157.151.26.190:3001...
+[90m2026-02-24 13:58:19[0m [36m[01][0m Validando proxy 157.151.26.190:3001...
+[90m2026-02-24 13:58:20[0m [36m[01][0m Proxy validado. IP Externo: 177.174.216.63 - ISP: Vivo
+[90m2026-02-24 13:58:20[0m [36m[01][0m Ô£à Proxy validado! IP: 177.174.216.63
+[90m2026-02-24 13:58:20[0m [36m[01][0m Criando proxy local an├┤nimo...
+[90m2026-02-24 13:58:20[0m [36m[01][0m Ô£à Proxy local criado: http://127.0.0.1:61327
+[90m2026-02-24 13:58:20[0m [36m[01][0m Iniciando cliente WhatsApp...
+[90m2026-02-24 13:58:22[0m [36m[01][0m ­ƒøí´©Å WebRTC Blocker ativo - IP protegido!
+[90m2026-02-24 13:58:25[0m [32m[SYSTEM][0m Backend API iniciado com sucesso!
+[90m2026-02-24 13:58:25[0m [36m[SYSTEM][0m ­ƒöù API rodando em: http://localhost:3000
+[90m2026-02-24 13:58:25[0m [36m[SYSTEM][0m ­ƒîÉ Frontend deve rodar em: http://localhost:5173
+
+============================================================
+­ƒôí BACKEND API PRONTO
+­ƒöî Aguardando conex├Áes do frontend...
+============================================================
+
+[90m2026-02-24 13:58:26[0m [32m[01][0m Ô£à Autenticado com sucesso!
+[90m2026-02-24 13:58:27[0m [32m[01][0m ­ƒÜÇ WhatsApp pronto!
+[90m2026-02-24 13:58:27[0m [36m[01][0m Conectado como: kaio.suporte (5516982400211)
+[90m2026-02-24 13:58:27[0m [36m[01][0m ­ƒöï Modo Standby (Ocioso) ativado. Iniciando ciclos simulados...
+[90m2026-02-24 13:58:27[0m [36m[01][0m ­ƒöï Pr├│xima "espiadinha" ociosa (Standby) programada para daqui a 6 minutos.
+[90m2026-02-24 13:58:27[0m [36m[01][0m ÔÅ│ Aguardando sincroniza├º├úo de chats silenciosa do WhatsApp...
+[90m2026-02-24 13:58:34[0m [36m[02][0m Sess├úo ponta e Sincronizada. Iniciando varredura (Bolinhas Verdes)...
+[90m2026-02-24 13:58:34[0m [36m[02][0m Buscando chats com mensagens n├úo lidas...
+[90m2026-02-24 13:58:34[0m [36m[02][0m Encontrado(s) 6 chat(s) com mensagens n├úo lidas. Iniciando Queue Handler...
+[90m2026-02-24 13:58:34[0m [36m[02][0m Chat 220392656470166: 1 unread. fetched 1 msgs.
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: 3EB010539CF5FF7DD927 | fromMe: false | timestamp: 1771880583
+[90m2026-02-24 13:58:34[0m [36m[02][0m Chat 120363422496660584: 1 unread. fetched 1 msgs.
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: 3EB030B8D7295DACFBCF73 | fromMe: false | timestamp: 1771941121
+[90m2026-02-24 13:58:34[0m [36m[02][0m ­ƒôª Fila [Grupo] - Add Msg de 10:52:01 de 120363422496660584@g.us...
+[90m2026-02-24 13:58:34[0m [36m[02][0m Chat 231559571464357: 1 unread. fetched 1 msgs.
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: 3EB03C93BCCD60C24C2B81 | fromMe: true | timestamp: 1771941137
+[90m2026-02-24 13:58:34[0m [36m[02][0m Chat 120363350017619992: 7 unread. fetched 7 msgs.
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: 2A2D5110431F859B3312 | fromMe: false | timestamp: 1771940943
+[90m2026-02-24 13:58:34[0m [36m[02][0m ­ƒôª Fila [Grupo] - Add Msg de 10:49:03 de 120363350017619992@g.us...
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: 2A26D882E82AC7269722 | fromMe: false | timestamp: 1771940954
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: 2A209CBCAFC2784DAD65 | fromMe: false | timestamp: 1771940956
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: 2A4D65B185A0862D31D3 | fromMe: false | timestamp: 1771940958
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: 3EB00854C7F98483BC1C9D | fromMe: true | timestamp: 1771941110
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: 3EB0DDF7D5A9A0374649C9 | fromMe: false | timestamp: 1771941119
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: A50BBBD06C6A0F05E24C30F0D44115EC | fromMe: false | timestamp: 1771941151
+[90m2026-02-24 13:58:34[0m [36m[02][0m ­ƒôÑ Desenfileirando: [­ƒô▓ sticker] de 120363350017619992@g.us
+[90m2026-02-24 13:58:34[0m [34m[02][0m ­ƒô¿ Mensagem recebida de grupo: AQUECIMENTO ­ƒöÑ #1
+[90m2026-02-24 13:58:34[0m [36m[02][0m ­ƒôª Fila [Privado] - Add Msg de 10:52:31 de 41751762960570@lid...
+[90m2026-02-24 13:58:34[0m [36m[02][0m Chat 134922807316498: 1 unread. fetched 1 msgs.
+[90m2026-02-24 13:58:34[0m [36m[02][0m => Msg ID: A54111F34E998E895FE627B7C3651B50 | fromMe: false | timestamp: 1771941156
+[90m2026-02-24 13:58:35[0m [36m[02][0m ­ƒô¿ [­ƒæÑ Grupo] AQUECIMENTO ­ƒöÑ #1 ÔÇö Primeiro contato
+[90m2026-02-24 13:58:35[0m [36m[02][0m ­ƒöÄ [Diagn├│stico] type="sticker" mime="image/webp" isAudio=false
+[90m2026-02-24 13:58:35[0m [36m[02][0m ÔÅ│ [1/5] Delay de leitura: 14.2s (simulando tempo de abrir a mensagem)
+[90m2026-02-24 13:58:35[0m [36m[02][0m ­ƒôª Fila [Privado] - Add Msg de 10:52:36 de 134922807316498@lid...
+[90m2026-02-24 13:58:35[0m [36m[02][0m Chat 248258387509326: 3 unread. fetched 3 msgs.
+[90m2026-02-24 13:58:35[0m [36m[02][0m => Msg ID: 3EB05F8F0FAAD894BA5C10 | fromMe: false | timestamp: 1771940775
+[90m2026-02-24 13:58:35[0m [36m[02][0m ­ƒôª Fila [Privado] - Add Msg de 10:46:15 de 248258387509326@lid...
+[90m2026-02-24 13:58:35[0m [36m[02][0m => Msg ID: 3EB0F8081B20FE37982DA9 | fromMe: true | timestamp: 1771941312
+[90m2026-02-24 13:58:35[0m [36m[02][0m => Msg ID: 3EB0C1A8DC2FCD2C9F44E4 | fromMe: false | timestamp: 1771941366
+[90m2026-02-24 13:58:36[0m [32m[02][0m Envio para Queue de pend├¬ncias conclu├¡do com sucesso!
+[90m2026-02-24 13:58:39[0m [36m[02][0m ­ƒôÑ Desenfileirando: "Fala! T├í de boa? ­ƒåÆ" de 248258387509326@lid
+[90m2026-02-24 13:58:40[0m [34m[02][0m ­ƒô¿ Mensagem recebida de contato: kaio.suporte
+[90m2026-02-24 13:58:40[0m [36m[02][0m ­ƒô¿ [­ƒæñ 1┬║ Contato] kaio.suporte ÔÇö Primeiro contato
+[90m2026-02-24 13:58:40[0m [36m[02][0m ­ƒöÄ [Diagn├│stico] type="chat" mime="" isAudio=false
+[90m2026-02-24 13:58:40[0m [36m[02][0m ÔÅ│ [1/5] Delay de leitura: 10.9s (simulando tempo de abrir a mensagem)
+[90m2026-02-24 13:58:42[0m [36m[01][0m Sess├úo ponta e Sincronizada. Iniciando varredura (Bolinhas Verdes)...
+[90m2026-02-24 13:58:42[0m [36m[01][0m Buscando chats com mensagens n├úo lidas...
+[90m2026-02-24 13:58:42[0m [36m[01][0m Encontrado(s) 3 chat(s) com mensagens n├úo lidas. Iniciando Queue Handler...
+[90m2026-02-24 13:58:42[0m [36m[01][0m Chat 125070135541788: 1 unread. fetched 1 msgs.
+[90m2026-02-24 13:58:42[0m [36m[01][0m => Msg ID: 3EB06182EDBBD86FA5B759 | fromMe: true | timestamp: 1771852583
+[90m2026-02-24 13:58:42[0m [36m[01][0m Chat 120363423599093269: 2 unread. fetched 2 msgs.
+[90m2026-02-24 13:58:42[0m [36m[01][0m => Msg ID: 3EB0DB0EC37110ECEDDBD6 | fromMe: true | timestamp: 1771939212
+[90m2026-02-24 13:58:42[0m [36m[01][0m => Msg ID: 3EB0F9289E44C67C6D6D94 | fromMe: false | timestamp: 1771941131
+[90m2026-02-24 13:58:42[0m [36m[01][0m ­ƒôª Fila [Grupo] - Add Msg de 10:52:11 de 120363423599093269@g.us...
+[90m2026-02-24 13:58:42[0m [36m[01][0m Chat 120363422852074852: 1 unread. fetched 1 msgs.
+[90m2026-02-24 13:58:42[0m [36m[01][0m => Msg ID: 3EB0816EE4EAC15E343D | fromMe: false | timestamp: 1771941280
+[90m2026-02-24 13:58:42[0m [36m[01][0m ­ƒôª Fila [Grupo] - Add Msg de 10:54:40 de 120363422852074852@g.us...
+[90m2026-02-24 13:58:42[0m [32m[01][0m Envio para Queue de pend├¬ncias conclu├¡do com sucesso!
+[90m2026-02-24 13:58:44[0m [36m[01][0m ­ƒôÑ Desenfileirando: "SAZDFXGCHFDSFGHJKL" de 120363423599093269@g.us
+[90m2026-02-24 13:58:44[0m [34m[01][0m ­ƒô¿ Mensagem recebida de grupo: Aquecimento #01
+[90m2026-02-24 13:58:45[0m [36m[01][0m ­ƒô¿ [­ƒæÑ Grupo] Aquecimento #01 ÔÇö Primeiro contato
+[90m2026-02-24 13:58:45[0m [36m[01][0m ­ƒöÄ [Diagn├│stico] type="chat" mime="" isAudio=false
+[90m2026-02-24 13:58:45[0m [36m[01][0m ÔÅ│ [1/5] Delay de leitura: 9.0s (simulando tempo de abrir a mensagem)
+[90m2026-02-24 13:58:49[0m [36m[02][0m ­ƒæü´©Å [2/5] Visualizando mensagem ÔÇö enviando tick azul...
+[90m2026-02-24 13:58:49[0m [36m[02][0m Ô£à Mensagem marcada como lida (tick azul enviado)
+[90m2026-02-24 13:58:49[0m [36m[02][0m Ôî¿´©Å [3/5] Delay de digita├º├úo: 19.4s (simulando digitando...)
+[90m2026-02-24 13:58:51[0m [36m[02][0m ­ƒæü´©Å [2/5] Visualizando mensagem ÔÇö enviando tick azul...
+[90m2026-02-24 13:58:51[0m [36m[02][0m Ô£à Mensagem marcada como lida (tick azul enviado)
+[90m2026-02-24 13:58:51[0m [36m[02][0m Ôî¿´©Å [3/5] Delay de digita├º├úo: 14.9s (simulando digitando...)
+[90m2026-02-24 13:58:53[0m [36m[01][0m ­ƒæü´©Å [2/5] Visualizando mensagem ÔÇö enviando tick azul...
+[90m2026-02-24 13:58:54[0m [36m[01][0m Ô£à Mensagem marcada como lida (tick azul enviado)
+[90m2026-02-24 13:58:54[0m [36m[01][0m Ôî¿´©Å [3/5] Delay de digita├º├úo: 10.3s (simulando digitando...)
+[90m2026-02-24 13:59:04[0m [36m[01][0m Ô£Å´©Å Fim da digita├º├úo
+[90m2026-02-24 13:59:04[0m [36m[01][0m ÔÅ│ [4/5] Delay de resposta: 17.6s (aguardando antes de enviar)
+[90m2026-02-24 13:59:06[0m [36m[02][0m Ô£Å´©Å Fim da digita├º├úo
+[90m2026-02-24 13:59:06[0m [36m[02][0m ÔÅ│ [4/5] Delay de resposta: 29.4s (aguardando antes de enviar)
+[90m2026-02-24 13:59:06[0m [36m[02][0m ­ƒöÑ IGNORADO: Faltam 1 min para ativar aquecimento
+[90m2026-02-24 13:59:06[0m [36m[01][0m ­ƒöÑ IGNORADO: Faltam 1 min para ativar aquecimento
+[90m2026-02-24 13:59:09[0m [36m[02][0m Ô£Å´©Å Fim da digita├º├úo
+[90m2026-02-24 13:59:09[0m [36m[02][0m ÔÅ│ [4/5] Delay de resposta: 21.8s (aguardando antes de enviar)
+[90m2026-02-24 13:59:22[0m [36m[01][0m ­ƒÜÇ [5/5] Preparando envio...
+[90m2026-02-24 13:59:22[0m [36m[01][0m ­ƒôñ Tipo: Texto ÔÇö "Ol├í membros! Vamos conversar no privado, s├│ chegar! ­ƒÜÂÔÇìÔÖé´©Å­ƒÆ¼"
+[90m2026-02-24 13:59:22[0m [36m[01][0m Ô£à Mensagem de texto enviada para Aquecimento #01
+[90m2026-02-24 13:59:23[0m [36m[01][0m ÔÅ▒´©Å Pausa Global: 2 min para Grupos ativada com sucesso
+[90m2026-02-24 13:59:31[0m [36m[02][0m ­ƒÜÇ [5/5] Preparando envio...
+[90m2026-02-24 13:59:31[0m [36m[02][0m ­ƒôñ Tipo: Texto ÔÇö "Ol├í membros! Vamos conversar no privado, s├│ chegar! ­ƒÜÂÔÇìÔÖé´©Å­ƒÆ¼"
+[90m2026-02-24 13:59:31[0m [36m[02][0m Ô£à Mensagem de texto enviada para AQUECIMENTO ­ƒöÑ #1
+[90m2026-02-24 13:59:31[0m [36m[02][0m ÔÅ▒´©Å Pausa Global: 2 min para Grupos ativada com sucesso
+[90m2026-02-24 13:59:36[0m [36m[02][0m ­ƒÜÇ [5/5] Preparando envio...
+[90m2026-02-24 13:59:36[0m [36m[02][0m ­ƒôñ Tipo: Texto ÔÇö "Oi kaio.suporte! Vamos trocar umas mensagens no privado, che..."
+[90m2026-02-24 13:59:36[0m [36m[02][0m Ô£à Mensagem de texto enviada para kaio.suporte
+[90m2026-02-24 13:59:36[0m [36m[02][0m ÔÅ▒´©Å Pausa Global: 2 min para Privados ativada com sucesso
+[90m2026-02-24 13:59:38[0m [36m[01][0m ­ƒôª Fila [Privado] - Add Msg de 10:59:38 de 245994922987568@lid...
+[90m2026-02-24 13:59:39[0m [36m[01][0m ­ƒôÑ Desenfileirando: "Oi kaio.suporte! Vamos trocar umas mensa" de 245994922987568@lid
+[90m2026-02-24 13:59:40[0m [34m[01][0m ­ƒô¿ Mensagem recebida de contato: kaio.suporte02
+[90m2026-02-24 13:59:40[0m [36m[01][0m ­ƒô¿ [­ƒæñ 1┬║ Contato] kaio.suporte02 ÔÇö Primeiro contato
+[90m2026-02-24 13:59:40[0m [36m[01][0m ­ƒöÄ [Diagn├│stico] type="chat" mime="" isAudio=false
+[90m2026-02-24 13:59:40[0m [36m[01][0m ÔÅ│ [1/5] Delay de leitura: 8.5s (simulando tempo de abrir a mensagem)
+[90m2026-02-24 13:59:48[0m [36m[01][0m ­ƒæü´©Å [2/5] Visualizando mensagem ÔÇö enviando tick azul...
+[90m2026-02-24 13:59:49[0m [36m[01][0m Ô£à Mensagem marcada como lida (tick azul enviado)
+[90m2026-02-24 13:59:49[0m [36m[01][0m Ôî¿´©Å [3/5] Delay de digita├º├úo: 11.0s (simulando digitando...)
+[90m2026-02-24 14:00:00[0m [36m[01][0m Ô£Å´©Å Fim da digita├º├úo
+[90m2026-02-24 14:00:00[0m [36m[01][0m ÔÅ│ [4/5] Delay de resposta: 15.1s (aguardando antes de enviar)
+[90m2026-02-24 14:00:06[0m [36m[02][0m ­ƒöÑ IGNORADO: Faltam 10 min para ativar aquecimento
+[90m2026-02-24 14:00:06[0m [36m[01][0m ­ƒöÑ IGNORADO: Faltam 1 min para ativar aquecimento
+[90m2026-02-24 14:00:15[0m [36m[01][0m ­ƒÜÇ [5/5] Preparando envio...
+[90m2026-02-24 14:00:15[0m [36m[01][0m ­ƒôñ Tipo: Texto ÔÇö "Oi kaio.suporte02! Bora continuar essa conversa no privado! ..."
+[90m2026-02-24 14:00:15[0m [36m[01][0m Ô£à Mensagem de texto enviada para kaio.suporte02
+[90m2026-02-24 14:00:16[0m [36m[01][0m ÔÅ▒´©Å Pausa Global: 2 min para Privados ativada com sucesso
+[90m2026-02-24 14:00:17[0m [36m[02][0m ­ƒôª Fila [Privado] - Add Msg de 11:00:15 de 248258387509326@lid...
+[90m2026-02-24 14:00:43[0m [36m[01][0m ­ƒôª Fila [Privado] - Add Msg de 11:00:42 de 44131426562168@lid...
+[90m2026-02-24 14:01:06[0m [36m[02][0m ­ƒöÑ IGNORADO: Faltam 9 min para ativar aquecimento
+[90m2026-02-24 14:01:06[0m [36m[01][0m ­ƒöÑ IGNORADO: Faltam 10 min para ativar aquecimento
+[90m2026-02-24 14:01:24[0m [36m[01][0m ­ƒôÑ Desenfileirando: "VOC├èS PREFEREM CHUVA OU SOL?" de 120363422852074852@g.us
+[90m2026-02-24 14:01:24[0m [34m[01][0m ­ƒô¿ Mensagem recebida de grupo: Aquecimento #03
+[90m2026-02-24 14:01:25[0m [36m[01][0m ­ƒô¿ [­ƒæÑ Grupo] Aquecimento #03 ÔÇö Primeiro contato
+[90m2026-02-24 14:01:25[0m [36m[01][0m ­ƒöÄ [Diagn├│stico] type="poll_creation" mime="" isAudio=false
+[90m2026-02-24 14:01:25[0m [36m[01][0m ÔÅ│ [1/5] Delay de leitura: 7.5s (simulando tempo de abrir a mensagem)
+[90m2026-02-24 14:01:33[0m [36m[01][0m ­ƒæü´©Å [2/5] Visualizando mensagem ÔÇö enviando tick azul...
+[90m2026-02-24 14:01:33[0m [36m[01][0m Ô£à Mensagem marcada como lida (tick azul enviado)
+[90m2026-02-24 14:01:33[0m [36m[01][0m Ôî¿´©Å [3/5] Delay de digita├º├úo: 11.1s (simulando digitando...)
+[90m2026-02-24 14:01:34[0m [36m[02][0m ­ƒôÑ Desenfileirando: "~SDFGHJMGBFVG" de 120363422496660584@g.us
+[90m2026-02-24 14:01:34[0m [34m[02][0m ­ƒô¿ Mensagem recebida de grupo: EXQUENTA WHATS ­ƒöÑ
+[90m2026-02-24 14:01:35[0m [36m[02][0m ­ƒô¿ [­ƒæÑ Grupo] EXQUENTA WHATS ­ƒöÑ ÔÇö Primeiro contato
+[90m2026-02-24 14:01:35[0m [36m[02][0m ­ƒöÄ [Diagn├│stico] type="chat" mime="" isAudio=false
+[90m2026-02-24 14:01:35[0m [36m[02][0m ÔÅ│ [1/5] Delay de leitura: 3.8s (simulando tempo de abrir a mensagem)
+[90m2026-02-24 14:01:38[0m [36m[02][0m ­ƒæü´©Å [2/5] Visualizando mensagem ÔÇö enviando tick azul...
+[90m2026-02-24 14:01:39[0m [36m[02][0m Ô£à Mensagem marcada como lida (tick azul enviado)
+[90m2026-02-24 14:01:39[0m [36m[02][0m Ôî¿´©Å [3/5] Delay de digita├º├úo: 12.2s (simulando digitando...)
+[90m2026-02-24 14:01:39[0m [36m[02][0m ­ƒôÑ Desenfileirando: [­ƒô▓ unknown] de 41751762960570@lid
+[90m2026-02-24 14:01:40[0m [34m[02][0m ­ƒô¿ Mensagem recebida de contato: Cliente
+[90m2026-02-24 14:01:40[0m [36m[02][0m ­ƒô¿ [­ƒæñ 1┬║ Contato] Cliente ÔÇö Primeiro contato
+[90m2026-02-24 14:01:40[0m [36m[02][0m ­ƒöÄ [Diagn├│stico] type="unknown" mime="" isAudio=false
+[90m2026-02-24 14:01:40[0m [36m[02][0m ÔÅ│ [1/5] Delay de leitura: 14.6s (simulando tempo de abrir a mensagem)
+[90m2026-02-24 14:01:44[0m [36m[01][0m Ô£Å´©Å Fim da digita├º├úo
+[90m2026-02-24 14:01:44[0m [36m[01][0m ÔÅ│ [4/5] Delay de resposta: 27.8s (aguardando antes de enviar)
+[90m2026-02-24 14:01:49[0m [36m[01][0m ­ƒôª Fila [Grupo] - Add Msg de 11:01:48 de 120363404071369338@g.us...
+[90m2026-02-24 14:01:51[0m [36m[01][0m ­ƒôª Fila [Grupo] - Add Msg de 11:01:49 de 120363423599093269@g.us...
+[90m2026-02-24 14:01:51[0m [36m[02][0m Ô£Å´©Å Fim da digita├º├úo
+[90m2026-02-24 14:01:51[0m [36m[02][0m ÔÅ│ [4/5] Delay de resposta: 26.0s (aguardando antes de enviar)
+[90m2026-02-24 14:01:53[0m [36m[02][0m ­ƒôª Fila [Grupo] - Add Msg de 11:01:50 de 120363350017619992@g.us...
+[90m2026-02-24 14:01:55[0m [36m[02][0m ­ƒæü´©Å [2/5] Visualizando mensagem ÔÇö enviando tick azul...
+[90m2026-02-24 14:01:55[0m [36m[02][0m Ô£à Mensagem marcada como lida (tick azul enviado)
+[90m2026-02-24 14:01:55[0m [36m[02][0m Ôî¿´©Å [3/5] Delay de digita├º├úo: 9.6s (simulando digitando...)
+[90m2026-02-24 14:02:04[0m [36m[02][0m Ô£Å´©Å Fim da digita├º├úo
+[90m2026-02-24 14:02:04[0m [36m[02][0m ÔÅ│ [4/5] Delay de resposta: 13.4s (aguardando antes de enviar)
+[90m2026-02-24 14:02:06[0m [36m[02][0m ­ƒöÑ IGNORADO: Faltam 8 min para ativar aquecimento
+[90m2026-02-24 14:02:06[0m [36m[01][0m ­ƒöÑ IGNORADO: Faltam 9 min para ativar aquecimento
+[90m2026-02-24 14:02:12[0m [36m[01][0m ­ƒÜÇ [5/5] Preparando envio...
+[90m2026-02-24 14:02:12[0m [36m[01][0m ­ƒôñ Tipo: Texto ÔÇö "E a├¡ pessoal! Me chama no privado, vamos papear! ­ƒùú´©Å­ƒô▓"
+[90m2026-02-24 14:02:12[0m [36m[01][0m Ô£à Mensagem de texto enviada para Aquecimento #03
+[90m2026-02-24 14:02:13[0m [36m[01][0m ÔÅ▒´©Å Pausa Global: 2 min para Grupos ativada com sucesso
+[90m2026-02-24 14:02:17[0m [36m[02][0m ­ƒÜÇ [5/5] Preparando envio...
+[90m2026-02-24 14:02:17[0m [36m[02][0m ­ƒôñ Tipo: Texto ÔÇö "Ol├í membros! Vamos conversar no privado, s├│ chegar! ­ƒÜÂÔÇìÔÖé´©Å­ƒÆ¼"
+[90m2026-02-24 14:02:18[0m [36m[02][0m ­ƒÜÇ [5/5] Preparando envio...
+[90m2026-02-24 14:02:18[0m [36m[02][0m ­ƒôñ Tipo: Texto ÔÇö "Oi Cliente! Fica ├á vontade, chama no privado! ­ƒæÇ­ƒô▓"
+[90m2026-02-24 14:02:18[0m [36m[02][0m Ô£à Mensagem de texto enviada para Cliente
+[90m2026-02-24 14:02:18[0m [36m[02][0m ÔÅ▒´©Å Pausa Global: 2 min para Privados ativada com sucesso
+[90m2026-02-24 14:02:18[0m [36m[02][0m Ô£à Mensagem de texto enviada para EXQUENTA WHATS ­ƒöÑ
+[90m2026-02-24 14:02:18[0m [36m[02][0m ÔÅ▒´©Å Pausa Global: 2 min para Grupos ativada com sucesso
+[90m2026-02-24 14:02:19[0m [36m[01][0m ­ƒôÑ Desenfileirando: "boooooooooomm diaaaaaaa" de 44131426562168@lid
+[90m2026-02-24 14:02:20[0m [34m[01][0m ­ƒô¿ Mensagem recebida de contato: consultorafgts
+[90m2026-02-24 14:02:20[0m [36m[01][0m ­ƒô¿ [­ƒæñ 1┬║ Contato] consultorafgts ÔÇö Primeiro contato
+[90m2026-02-24 14:02:20[0m [36m[01][0m ­ƒöÄ [Diagn├│stico] type="chat" mime="" isAudio=false
+[90m2026-02-24 14:02:20[0m [36m[01][0m ÔÅ│ [1/5] Delay de leitura: 9.8s (simulando tempo de abrir a mensagem)
+[90m2026-02-24 14:02:30[0m [36m[01][0m ­ƒæü´©Å [2/5] Visualizando mensagem ÔÇö enviando tick azul...
+[90m2026-02-24 14:02:30[0m [36m[01][0m Ô£à Mensagem marcada como lida (tick azul enviado)
+[90m2026-02-24 14:02:30[0m [36m[01][0m Ôî¿´©Å [3/5] Delay de digita├º├úo: 9.0s (simulando digitando...)
+[90m2026-02-24 14:02:39[0m [36m[01][0m Ô£Å´©Å Fim da digita├º├úo
+[90m2026-02-24 14:02:39[0m [36m[01][0m ÔÅ│ [4/5] Delay de resposta: 24.3s (aguardando antes de enviar)
+[90m2026-02-24 14:03:03[0m [36m[01][0m ­ƒÜÇ [5/5] Preparando envio...
+[90m2026-02-24 14:03:03[0m [36m[01][0m ­ƒôñ Tipo: Texto ÔÇö "Oi consultorafgts! Bora galera, aquecer o chat, privado libe..."
+[90m2026-02-24 14:03:03[0m [36m[01][0m Ô£à Mensagem de texto enviada para consultorafgts
+[90m2026-02-24 14:03:04[0m [36m[01][0m ÔÅ▒´©Å Pausa Global: 2 min para Privados ativada com sucesso
+[90m2026-02-24 14:03:06[0m [36m[02][0m ­ƒöÑ IGNORADO: Faltam 10 min para ativar aquecimento
+[90m2026-02-24 14:03:06[0m [36m[01][0m ­ƒöÑ IGNORADO: Faltam 10 min para ativar aquecimento
+[90m2026-02-24 14:03:35[0m [36m[01][0m ­ƒôª Fila [Privado] - Add Msg de 11:03:33 de 44131426562168@lid...

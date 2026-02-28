@@ -1,0 +1,52 @@
+# Dependências
+node_modules/
+package-lock.json
+
+# Ambiente
+# .env  # Commented out for DisCloud - needs .env in repo
+
+# Sessões autenticadas (IMPORTANTE: Faça backup!)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Logs
+logs/
+*.log
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporários
+tmp/
+temp/
+*.tmp
+
+# Backup
+*.backup
+*.bak
+sessoes_*.tar.gz
+
+# Chromium cache e dados de sessão
+puppeteer_data/
+.local-chromium/
+CrashpadMetr*
+**/Crashpad/**
+**/Cache/**
+**/GPUCache/**
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Pastas desnecessárias
+Nova pasta/
+recordings/
+media/
