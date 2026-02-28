@@ -71,7 +71,14 @@ class WebServer {
 
         if (process.env.NODE_ENV === 'production' || fs.existsSync(frontendDistPath)) {
             logger.info(null, `🌐 Servindo arquivos estáticos do frontend em modo de produção`);
+
+            // Explicitly serve static files
             this.app.use(express.static(frontendDistPath));
+
+            // Explicitly handle the root route
+            this.app.get('/', (req, res) => {
+                res.sendFile(path.join(frontendDistPath, 'index.html'));
+            });
         } else {
             logger.info(null, `🔧 Backend configurado apenas como API. O frontend deve rodar em sua própria porta (ex: 3000 ou 5173).`);
         }
