@@ -250,8 +250,9 @@ class WebServer {
      */
     start(port = 3000) {
         return new Promise((resolve) => {
-            this.server.listen(port, () => {
-                logger.success(null, `🚀 Backend API rodando em http://localhost:${port}`);
+            // Bind to 0.0.0.0 is MANDATORY for external access in Discloud/Docker
+            this.server.listen(port, '0.0.0.0', () => {
+                logger.success(null, `🚀 Backend API rodando em http://0.0.0.0:${port}`);
                 logger.info(null, `🔗 CORS habilitado para: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
                 resolve();
             });
