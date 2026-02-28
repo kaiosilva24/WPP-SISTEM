@@ -1,4 +1,4 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+﻿const { Client, LocalAuth } = require('whatsapp-web.js');
 const path = require('path');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const proxyChain = require('proxy-chain');
@@ -226,6 +226,11 @@ class WhatsAppSession extends EventEmitter {
             const startVisible = this.runtimeOptions && this.runtimeOptions.visible;
 
             const dataPath = path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.wwebjs_auth_aquecimento', `session-${this.accountId}`);
+            const chromiumProfilePath = dataPath + '_chromium_profile';
+
+            // === CRITICO: Limpa lock files do Chromium antes de iniciar ==
+            // Sem isso, reinicializacoes ficam travadas esperando lock liberado
+            await this.cleanUserDataDir(chromiumProfilePath);
 
             const clientConfig = {
                 authStrategy: new LocalAuth({
@@ -234,7 +239,7 @@ class WhatsAppSession extends EventEmitter {
                     // Linux (DisCloud): HOME, Windows: USERPROFILE
                     dataPath: dataPath
                 }),
-                requestTimeout: 60000,
+                requestTimeout: 120000,  // 2 minutos para ambientes cloud
                 puppeteer: {
                     // Em produção (Linux), força headless. Remove executablePath para usar bundled Chromium
                     headless: process.platform === 'linux' ? true : !startVisible,
@@ -248,11 +253,14 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-accelerated-2d-canvas',
                         '--no-first-run',
                         '--no-zygote',
+                        '--single-process',          // CRITICO para containers Discloud
+                        '--memory-pressure-off',
+                        '--disable-background-timer-throttling',
                         '--disable-gpu',
                         '--disable-features=IsolateOrigins,site-per-process',
 
                         // === CORREÇÃO DO LOCK DO CROMIUM NO DISCLOUD ===
-                        `--user-data-dir=${dataPath}_chromium_profile`,
+                        `--user-data-dir=${chromiumProfilePath}`,
 
                         // === CORREÇÃO DO VAZAMENTO WEBRTC (CRÍTICO!) ===
                         '--disable-webrtc',
@@ -299,6 +307,30 @@ class WhatsAppSession extends EventEmitter {
     }
 
     /**
+
+    /**
+     * Limpa arquivos de lock do Chromium para evitar travamento em reinicializacoes
+     * O SingletonLock impede o Chromium de iniciar se existir de uma sessao anterior
+     */
+    async cleanUserDataDir(profilePath) {
+        const fs = require('fs');
+        const p = require('path');
+        const lockFiles = [
+            p.join(profilePath, 'SingletonLock'),
+            p.join(profilePath, 'SingletonSocket'),
+            p.join(profilePath, 'SingletonCookie'),
+            p.join(profilePath, 'Default', 'lockfile'),
+        ];
+        for (const lockFile of lockFiles) {
+            try {
+                if (fs.existsSync(lockFile)) {
+                    fs.unlinkSync(lockFile);
+                    console.log('[CHROMIUM] Lock file removido:', p.basename(lockFile));
+                }
+            } catch (e) { /* ignora */ }
+        }
+    }
+
      * Configura autenticação ANTES da navegação começar (BLOCKING)
      */
     async setupProxyAuthBeforeNavigation() {
