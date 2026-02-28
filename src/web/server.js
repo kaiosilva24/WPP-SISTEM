@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const socketIO = require('socket.io');
 const cors = require('cors');
 const QRCode = require('qrcode');
@@ -40,8 +41,6 @@ class WebServer {
      * Configura middleware
      */
     setupMiddleware() {
-        const path = require('path');
-
         // CORS para requisições HTTP (suporta desenvolvimento e produção)
         const allowedOrigins = [
             process.env.FRONTEND_URL || 'http://localhost:3000',
