@@ -65,12 +65,21 @@ class WebServer {
 
         this.app.use(express.json());
 
+        // DEBUG: Logging all incoming requests to trace Discloud routing
+        this.app.use((req, res, next) => {
+            logger.info(null, `[DISCLOUD DEBUG] Incoming GET req: ${req.url}`);
+            next();
+        });
+
         // Servir frontend em produção (Discloud)
         const fs = require('fs');
         const frontendDistPath = path.join(__dirname, '../../frontend/dist');
 
         if (process.env.NODE_ENV === 'production' || fs.existsSync(frontendDistPath)) {
             logger.info(null, `🌐 Servindo arquivos estáticos do frontend em modo de produção`);
+            logger.info(null, `📂 Caminho físico do Frontend Dist: ${frontendDistPath}`);
+            const indexExists = fs.existsSync(path.join(frontendDistPath, 'index.html'));
+            logger.info(null, `📄 Index HTML existe na pasta? ${indexExists}`);
 
             // Explicitly serve static files
             this.app.use(express.static(frontendDistPath));
