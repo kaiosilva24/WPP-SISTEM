@@ -47,7 +47,8 @@ class WebServer {
             process.env.FRONTEND_URL || 'http://localhost:3000',
             'http://localhost:5173',
             'https://wpp.discloud.app',
-            'https://wpp-aquecimento.discloud.app'
+            'https://wpp-aquecimento.discloud.app',
+            'https://wpp-advanced.discloud.app'
         ];
 
         this.app.use(cors({
@@ -65,9 +66,10 @@ class WebServer {
 
         this.app.use(express.json());
 
-        // Frontend estático não será servido pelo backend (Porta 8080) a pedido do usuário.
-        // O frontend agora abre somente na porta 3000 independente do backend.
-        logger.info(null, `🔧 Backend configurado apenas como API. O frontend deve rodar em sua própria porta (ex: 3000).`);
+        // Servir frontend estático (produção e Discloud)
+        const frontendDistPath = path.join(__dirname, '../../frontend/dist');
+        logger.info(null, `🌐 Servindo arquivos estáticos do frontend de: ${frontendDistPath}`);
+        this.app.use(express.static(frontendDistPath));
     }
 
     /**
@@ -138,10 +140,13 @@ class WebServer {
             }
         });
 
-        // Rota de fallback caso tentem acessar rotas não-API no backend (8080)
+        // Rota de fallback - serve index.html para SPA routing
         this.app.get('*', (req, res) => {
             if (!req.path.startsWith('/api') && !req.path.startsWith('/socket.io')) {
-                res.status(404).send('Not Found. Este servidor provê apenas a API da aplicação (Porta 8080). O frontend encontra-se na porta 3000.');
+                const frontendDistPath = path.join(__dirname, '../../frontend/dist');
+                res.sendFile(path.join(frontendDistPath, 'index.html'));
+            } else {
+                res.status(404).json({ error: 'API endpoint not found' });
             }
         });
     }
