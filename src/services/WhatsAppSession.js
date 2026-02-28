@@ -225,12 +225,14 @@ class WhatsAppSession extends EventEmitter {
             // 3. Configuração do Cliente
             const startVisible = this.runtimeOptions && this.runtimeOptions.visible;
 
+            const dataPath = path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.wwebjs_auth_aquecimento', `session-${this.accountId}`);
+
             const clientConfig = {
                 authStrategy: new LocalAuth({
                     clientId: `account-${this.accountId}`,
                     // Usando caminho correto para cada sistema operacional
                     // Linux (DisCloud): HOME, Windows: USERPROFILE
-                    dataPath: path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.wwebjs_auth_aquecimento')
+                    dataPath: dataPath
                 }),
                 requestTimeout: 60000,
                 puppeteer: {
@@ -248,6 +250,9 @@ class WhatsAppSession extends EventEmitter {
                         '--no-zygote',
                         '--disable-gpu',
                         '--disable-features=IsolateOrigins,site-per-process',
+
+                        // === CORREÇÃO DO LOCK DO CROMIUM NO DISCLOUD ===
+                        `--user-data-dir=${dataPath}_chromium_profile`,
 
                         // === CORREÇÃO DO VAZAMENTO WEBRTC (CRÍTICO!) ===
                         '--disable-webrtc',
