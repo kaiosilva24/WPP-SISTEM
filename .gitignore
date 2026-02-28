@@ -2,16 +2,26 @@
 node_modules/
 package-lock.json
 
-# Ambiente
-# .env  # Commented out for DisCloud - needs .env in repo
+# -------------------------------------------
+# ATENÇÃO: .env NÃO está no .gitignore
+# pois o Discloud precisa dele no repositório
+# -------------------------------------------
 
 # Sessões autenticadas (IMPORTANTE: Faça backup!)
 .wwebjs_auth/
 .wwebjs_cache/
 
-# Logs
+# Logs e arquivos de debug
 logs/
 *.log
+crash_log*.txt
+debug_utf8*.txt
+filtered_log.txt
+log_debug.txt
+logs_nacional*.txt
+check_result.txt
+err.txt
+error_launch.log
 
 # Sistema
 .DS_Store
@@ -50,3 +60,10 @@ CrashpadMetr*
 Nova pasta/
 recordings/
 media/
+
+# Banco de dados local (Discloud usa PostgreSQL externo)
+database.sqlite
+
+# Arquivos de teste
+test_*.js
+fix_webhook.py
