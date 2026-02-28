@@ -331,6 +331,7 @@ class WhatsAppSession extends EventEmitter {
         }
     }
 
+    /**
      * Configura autenticação ANTES da navegação começar (BLOCKING)
      */
     async setupProxyAuthBeforeNavigation() {
