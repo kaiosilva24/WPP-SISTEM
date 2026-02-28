@@ -65,9 +65,20 @@ class WebServer {
 
         this.app.use(express.json());
 
-        // Frontend estático não será servido pelo backend (Porta 8080) a pedido do usuário.
-        // O frontend agora abre somente na porta 3000 independente do backend.
-        logger.info(null, `🔧 Backend configurado apenas como API. O frontend deve rodar em sua própria porta (ex: 3000).`);
+        // Servir frontend em produção (Discloud)
+        const fs = require('fs');
+        const frontendDistPath = path.join(__dirname, '../../frontend/dist');
+
+        if (process.env.NODE_ENV === 'production' || fs.existsSync(frontendDistPath)) {
+            logger.info(null, `🌐 Servindo arquivos estáticos do frontend em modo de produção`);
+
+            // Explicitly serve static files
+            this.app.use(express.static(frontendDistPath));
+
+            // Fallback route is in setupRoutes()
+        } else {
+            logger.info(null, `🔧 Backend configurado apenas como API. O frontend deve rodar em sua própria porta.`);
+        }
     }
 
     /**
@@ -141,7 +152,18 @@ class WebServer {
         // Rota de fallback caso tentem acessar rotas não-API no backend (8080)
         this.app.get('*', (req, res) => {
             if (!req.path.startsWith('/api') && !req.path.startsWith('/socket.io')) {
-                res.status(404).send('Not Found. Este servidor provê apenas a API da aplicação (Porta 8080). O frontend encontra-se na porta 3000.');
+                const fs = require('fs');
+                const path = require('path');
+                const frontendDistPath = path.join(__dirname, '../../frontend/dist');
+
+                if (process.env.NODE_ENV === 'production' || fs.existsSync(frontendDistPath)) {
+                    // Always fallback to index.html for client-side routing
+                    res.sendFile(path.join(frontendDistPath, 'index.html'));
+                } else {
+                    res.status(404).send('Not Found. Este servidor provê apenas a API da aplicação. O frontend encontra-se na porta 3000.');
+                }
+            } else {
+                res.status(404).json({ error: 'API route not found' });
             }
         });
     }
