@@ -15,7 +15,7 @@ class DatabaseManager {
       host: process.env.DB_HOST || '129.80.149.224',
       database: process.env.DB_NAME || 'whatsapp_warming',
       password: process.env.DB_PASS || 'SecurePass_WhatsApp_2026!',
-      port: parseInt(process.env.DB_PORT) || 8080,
+      port: parseInt(process.env.DATABASE_PORT) || 8080,
     };
 
     // DEBUG: Log configuration
