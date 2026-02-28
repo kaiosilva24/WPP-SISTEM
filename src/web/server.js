@@ -160,10 +160,13 @@ class WebServer {
                 const frontendDistPath = path.join(__dirname, '../../frontend/dist');
 
                 if (process.env.NODE_ENV === 'production' || fs.existsSync(frontendDistPath)) {
+                    // Always fallback to index.html for client-side routing
                     res.sendFile(path.join(frontendDistPath, 'index.html'));
                 } else {
                     res.status(404).send('Not Found. Este servidor provê apenas a API da aplicação. O frontend encontra-se em modo de desenvolvimento.');
                 }
+            } else {
+                res.status(404).json({ error: 'API route not found' });
             }
         });
     }
