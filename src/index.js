@@ -39,8 +39,8 @@ async function main() {
         // Inicia servidor web
         logger.info(null, 'Iniciando servidor backend API...');
         const webServer = new WebServer();
-        // Prioritize process.env.PORT (DisCloud/Cloud)
-        const port = process.env.PORT || 8080;
+        // Prioritize process.env.PORT (DisCloud/Cloud), otherwise 80
+        const port = process.env.PORT || 80;
         await webServer.start(port);
 
         // Conecta message handler com session manager
