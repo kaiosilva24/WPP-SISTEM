@@ -231,7 +231,7 @@ class WhatsAppSession extends EventEmitter {
             // === CRITICO: Limpa lock files do Chromium antes de iniciar ==
             // Sem isso, reinicializacoes ficam travadas esperando lock liberado
             // LocalAuth usa: dataPath/session-account-{id} como userDataDir
-            const localAuthUserDataDir = path.join(dataPath, session-account-);
+            const localAuthUserDataDir = path.join(dataPath, `session-account-${this.accountId}`);
             await this.cleanUserDataDir(localAuthUserDataDir);
             await this.cleanUserDataDir(chromiumProfilePath);
 
