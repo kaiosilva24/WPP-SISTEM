@@ -22,12 +22,12 @@ class WebServer {
         // Permite que as rotas acessem a instância do WebServer (Ex: para disparar Socket Updates manuais)
         this.app.set('webServer', this);
 
-        // Configuração CORS para Socket.IO
+        // Configuração CORS para Socket.IO - aceita todas as origens
+        // (necessário porque no Discloud o .env pode estar vazio)
         this.io = socketIO(this.server, {
             cors: {
-                origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-                methods: ['GET', 'POST', 'PUT', 'DELETE'],
-                credentials: true
+                origin: '*',
+                methods: ['GET', 'POST', 'PUT', 'DELETE']
             }
         });
 
@@ -67,7 +67,14 @@ class WebServer {
 
         // Servir frontend estático (produção e Discloud)
         const frontendDistPath = path.join(__dirname, '../../frontend/dist');
+        const fs = require('fs');
+        const indexExists = fs.existsSync(path.join(frontendDistPath, 'index.html'));
         logger.info(null, `🌐 Servindo arquivos estáticos do frontend de: ${frontendDistPath}`);
+        if (indexExists) {
+            logger.success(null, '✅ frontend/dist/index.html encontrado! Frontend será servido.');
+        } else {
+            logger.error(null, '❌ frontend/dist/index.html NÃO ENCONTRADO! O BUILD do frontend falhou ou não foi executado.');
+        }
         this.app.use(express.static(frontendDistPath));
     }
 
