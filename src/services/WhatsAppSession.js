@@ -517,20 +517,20 @@ class WhatsAppSession extends EventEmitter {
             // Cria o agente
             const agent = new HttpsProxyAgent(proxyUrl);
 
-            // Testa conexão usando o agente (semelhante ao puppeteer)
-            const response = await axios.get('http://ip-api.com/json/', {
-                httpsAgent: agent, // Para URLs HTTPS (se usasse https://ip-api.com)
-                httpAgent: agent,  // Para URLs HTTP
-                timeout: 10000
+            // Testa conexão usando o agente HTTPS em um endpoint HTTPS!
+            // Endpoint HTTP + HttpsProxyAgent = falha de CONNECT no proxy na porta 80.
+            const response = await axios.get('https://api.ipify.org?format=json', {
+                httpsAgent: agent,
+                timeout: 15000 // Aumentado para lidar com delay na troca de rota de IPs
             });
 
-            if (response.data && response.data.query) {
-                this.publicIP = response.data.query;
-                this.isp = response.data.isp || response.data.org || 'Desconhecido';
-                this.country = response.data.country || 'Desconhecido';
-                this.city = response.data.city || 'Desconhecido';
+            if (response.data && response.data.ip) {
+                this.publicIP = response.data.ip;
+                this.isp = 'Desconhecido'; // api.ipify não retorna ISP, mas garante a conexão
+                this.country = 'Desconhecido';
+                this.city = 'Desconhecido';
 
-                logger.info(this.accountName, `Proxy validado. IP Externo: ${this.publicIP} - ISP: ${this.isp}`);
+                logger.info(this.accountName, `Proxy validado. IP Externo: ${this.publicIP}`);
                 return true;
             }
 

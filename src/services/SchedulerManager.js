@@ -98,34 +98,35 @@ class SchedulerManager {
         // Caso contrário, sessionManager.createSession().
         const session = sessionManager.getSession(id);
 
-        // Se usa um grupo de proxy ou tem um IP de proxy configurado, precisamos checar se já tem outra conta rodando nesse IP/Porta
-        if (proxy_group_id || account.proxy_ip) {
+        // Checa conflito de proxy: bloqueia APENAS quando outra conta usa o MESMO IP:Porta
+        // Contas com proxy_group_id igual mas IPs diferentes podem rodar simultaneamente
+        if (account.proxy_ip) {
             const allAccounts = await db.getAllAccounts();
 
-            const isInUseByAnother = allAccounts.some(a => {
+            const pIp1 = (account.proxy_ip || '').trim();
+            const pPort1 = String(account.proxy_port || '').trim();
+
+            const conflictAccount = allAccounts.find(a => {
                 if (a.id === id) return false;
 
-                const hasSameGroupId = proxy_group_id && a.proxy_group_id === proxy_group_id;
+                const pIp2 = (a.proxy_ip || '').trim();
+                const pPort2 = String(a.proxy_port || '').trim();
 
-                const pIp1 = account.proxy_ip || '';
-                const pPort1 = account.proxy_port || '';
-                const pIp2 = a.proxy_ip || '';
-                const pPort2 = a.proxy_port || '';
+                // Só bloqueia se o IP E Porta forem exatamente iguais
+                const hasSameIpPort = pIp1 && pIp2 && pIp1 === pIp2 && pPort1 === pPort2;
 
-                const hasSameIpPort = pIp1 && pIp1 === pIp2 && pPort1 === pPort2;
-
-                if (hasSameGroupId || hasSameIpPort) {
+                if (hasSameIpPort) {
                     const sess = sessionManager.getSession(a.id);
-                    // Qualquer sessão não-desconectada e não-pausada caracteriza proxy em uso
-                    if (sess && !sess.isPaused && sess.status !== 'disconnected') {
+                    // Sessão ativa = qualquer estado exceto desconectada/pausada/erro
+                    if (sess && !sess.isPaused && sess.status !== 'disconnected' && sess.status !== 'error') {
                         return true;
                     }
                 }
                 return false;
             });
 
-            if (isInUseByAnother) {
-                logger.error('Scheduler', `[${name}] INICIAÇÃO RECUSADA: O Proxy/Grupo já está sendo utilizado por outra conta em execução.`);
+            if (conflictAccount) {
+                logger.error('Scheduler', `[${name}] INICIAÇÃO RECUSADA: O Proxy ${pIp1}:${pPort1} já está sendo utilizado pela conta "${conflictAccount.name}".`);
                 return; // ABORTA O START!
             }
         }
