@@ -9,12 +9,28 @@ console.log('   Path:', envPath);
 console.log('   Exists:', fs.existsSync(envPath));
 
 if (fs.existsSync(envPath)) {
-    console.log('   Content preview:', fs.readFileSync(envPath, 'utf8').substring(0, 200));
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    console.log('   Size:', envContent.length, 'bytes');
+    console.log('   Content preview:', envContent.substring(0, 200));
 }
 
 // Carrega dotenv
 const result = require('dotenv').config({ path: envPath });
 console.log('   dotenv result:', result.error ? result.error.message : 'OK - loaded');
+
+// === FALLBACK: Se .env estiver vazio (DisCloud), define variáveis hardcoded ===
+if (!process.env.DB_HOST) {
+    console.log('⚠️  DB_HOST não definido pelo .env — aplicando fallback hardcoded');
+    process.env.DB_HOST = '129.80.149.224';
+    process.env.DB_PORT = '8080';
+    process.env.DB_USER = 'admin';
+    process.env.DB_PASS = 'SecurePass_WhatsApp_2026!';
+    process.env.DB_NAME = 'whatsapp_warming';
+}
+
+if (!process.env.FRONTEND_URL) {
+    process.env.FRONTEND_URL = 'https://wpp-advanced.discloud.app';
+}
 
 // Configura caminho dos módulos
 process.env.NODE_PATH = __dirname + '/node_modules';
