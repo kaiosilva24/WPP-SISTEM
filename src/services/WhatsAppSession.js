@@ -317,6 +317,7 @@ class WhatsAppSession extends EventEmitter {
     async cleanUserDataDir(profilePath) {
         const fs = require('fs');
         const p = require('path');
+        if (!profilePath) return;
         const lockFiles = [
             p.join(profilePath, 'SingletonLock'),
             p.join(profilePath, 'SingletonSocket'),
@@ -325,11 +326,17 @@ class WhatsAppSession extends EventEmitter {
         ];
         for (const lockFile of lockFiles) {
             try {
-                if (fs.existsSync(lockFile)) {
-                    fs.unlinkSync(lockFile);
-                    console.log('[CHROMIUM] Lock file removido:', p.basename(lockFile));
+                // Usa lstatSync (nao existsSync!) porque no Linux o SingletonLock
+                // e um SYMLINK - existsSync retorna false para symlinks quebrados (dangling),
+                // mas lstatSync funciona no proprio symlink, nao no destino
+                fs.lstatSync(lockFile); // lanca erro se nao existe
+                fs.unlinkSync(lockFile);
+                console.log('[CHROMIUM] Lock removido:', p.basename(lockFile), 'em', profilePath);
+            } catch (e) {
+                if (e.code !== 'ENOENT') {
+                    console.log('[CHROMIUM] Aviso ao remover lock:', e.message);
                 }
-            } catch (e) { /* ignora */ }
+            }
         }
     }
 
