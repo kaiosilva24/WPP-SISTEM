@@ -385,6 +385,12 @@ class MessageHandler {
         const processingKey = `${session.accountId}_${contactId}`;
 
         try {
+            // Evita processar mensagens se a sessão caiu ou está reconectando
+            if (!session.client || session.status !== 'ready') {
+                logger.warn(session.accountName, `⚠️ Ignorando Fila: Sessão ${session.status} (provável queda/reconexão). Mensagem zumbi descartada.`);
+                return;
+            }
+
             this.processing.add(processingKey);
 
             // Loga tipo da mensagem sendo desenfileirada
