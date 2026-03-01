@@ -531,9 +531,10 @@ router.post('/:id/start', async (req, res) => {
             }
         }
 
-        // Usa o SchedulerManager para ativação segura (verifica Proxies conflitantes antes)
+        // Usa o SchedulerManager para ativação (forceManualStart=true bypassa bloqueio de grupo proxy)
         console.log(`[API] Solicitando inicialização via SchedulerManager para conta ${account.id}`);
-        await schedulerManager.activateAccount(account);
+        await schedulerManager.activateAccount(account, true);  // true = inicialização manual
+
         console.log(`[API] Comando de Sessão enviado para conta ${account.id}`);
 
         res.json({ message: 'Sessão iniciada/agendada' });
