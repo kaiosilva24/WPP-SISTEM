@@ -91,7 +91,7 @@ class SchedulerManager {
     /**
      * Função auxiliar para Ativar uma Conta e disparar IP Change do Grupo Proxy.
      */
-    async activateAccount(account, forceManualStart = false) {
+    async activateAccount(account) {
         const { id, name, proxy_group_id, webhook_id } = account;
 
         // Se a conta já tiver sessão no SessionManager e não estiver destruída, usaremos session.resume().
@@ -99,8 +99,7 @@ class SchedulerManager {
         const session = sessionManager.getSession(id);
 
         // Se usa um grupo de proxy ou tem um IP de proxy configurado, precisamos checar se já tem outra conta rodando nesse IP/Porta
-        // EXCETO quando é inicialização manual forçada pelo usuário
-        if (!forceManualStart && (proxy_group_id || account.proxy_ip)) {
+        if (proxy_group_id || account.proxy_ip) {
             const allAccounts = await db.getAllAccounts();
 
             const isInUseByAnother = allAccounts.some(a => {
