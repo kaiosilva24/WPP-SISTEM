@@ -6,7 +6,6 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "build": "npm install && cd frontend && npm install && npm run build",
     "test": "echo \"Sistema de Aquecimento WhatsApp\" && exit 0"
   },
   "keywords": [

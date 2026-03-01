@@ -22,12 +22,12 @@ class WebServer {
         // Permite que as rotas acessem a instância do WebServer (Ex: para disparar Socket Updates manuais)
         this.app.set('webServer', this);
 
-        // Configuração CORS para Socket.IO - aceita todas as origens
-        // (necessário porque no Discloud o .env pode estar vazio)
+        // Configuração CORS para Socket.IO
         this.io = socketIO(this.server, {
             cors: {
-                origin: '*',
-                methods: ['GET', 'POST', 'PUT', 'DELETE']
+                origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+                methods: ['GET', 'POST', 'PUT', 'DELETE'],
+                credentials: true
             }
         });
 
@@ -67,14 +67,7 @@ class WebServer {
 
         // Servir frontend estático (produção e Discloud)
         const frontendDistPath = path.join(__dirname, '../../frontend/dist');
-        const fs = require('fs');
-        const indexExists = fs.existsSync(path.join(frontendDistPath, 'index.html'));
         logger.info(null, `🌐 Servindo arquivos estáticos do frontend de: ${frontendDistPath}`);
-        if (indexExists) {
-            logger.success(null, '✅ frontend/dist/index.html encontrado! Frontend será servido.');
-        } else {
-            logger.error(null, '❌ frontend/dist/index.html NÃO ENCONTRADO! O BUILD do frontend falhou ou não foi executado.');
-        }
         this.app.use(express.static(frontendDistPath));
     }
 
@@ -236,8 +229,8 @@ class WebServer {
      */
     start(port = 3000) {
         return new Promise((resolve) => {
-            this.server.listen(port, '0.0.0.0', () => {
-                logger.success(null, `🚀 Backend API rodando em http://0.0.0.0:${port}`);
+            this.server.listen(port, () => {
+                logger.success(null, `🚀 Backend API rodando em http://localhost:${port}`);
                 logger.info(null, `🔗 CORS habilitado para: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
                 resolve();
             });

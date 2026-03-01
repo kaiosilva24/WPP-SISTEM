@@ -231,7 +231,7 @@ class WhatsAppSession extends EventEmitter {
             // === CRITICO: Limpa lock files do Chromium antes de iniciar ==
             // Sem isso, reinicializacoes ficam travadas esperando lock liberado
             // LocalAuth usa: dataPath/session-account-{id} como userDataDir
-            const localAuthUserDataDir = path.join(dataPath, `session-account-${this.accountId}`);
+            const localAuthUserDataDir = path.join(dataPath, session - account -);
             await this.cleanUserDataDir(localAuthUserDataDir);
             await this.cleanUserDataDir(chromiumProfilePath);
 
@@ -317,7 +317,6 @@ class WhatsAppSession extends EventEmitter {
     async cleanUserDataDir(profilePath) {
         const fs = require('fs');
         const p = require('path');
-        if (!profilePath) return;
         const lockFiles = [
             p.join(profilePath, 'SingletonLock'),
             p.join(profilePath, 'SingletonSocket'),
@@ -326,17 +325,11 @@ class WhatsAppSession extends EventEmitter {
         ];
         for (const lockFile of lockFiles) {
             try {
-                // Usa lstatSync (nao existsSync!) porque no Linux o SingletonLock
-                // e um SYMLINK - existsSync retorna false para symlinks quebrados (dangling),
-                // mas lstatSync funciona no proprio symlink, nao no destino
-                fs.lstatSync(lockFile); // lanca erro se nao existe
-                fs.unlinkSync(lockFile);
-                console.log('[CHROMIUM] Lock removido:', p.basename(lockFile), 'em', profilePath);
-            } catch (e) {
-                if (e.code !== 'ENOENT') {
-                    console.log('[CHROMIUM] Aviso ao remover lock:', e.message);
+                if (fs.existsSync(lockFile)) {
+                    fs.unlinkSync(lockFile);
+                    console.log('[CHROMIUM] Lock file removido:', p.basename(lockFile));
                 }
-            }
+            } catch (e) { /* ignora */ }
         }
     }
 
