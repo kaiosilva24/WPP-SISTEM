@@ -255,12 +255,11 @@ class WhatsAppSession extends EventEmitter {
                         '--no-zygote',
                         '--single-process',          // CRITICO para containers Discloud
                         '--memory-pressure-off',
+                        '--no-recovery-component',
+                        '--disable-session-crashed-bubble',
                         '--disable-background-timer-throttling',
                         '--disable-gpu',
                         '--disable-features=IsolateOrigins,site-per-process',
-
-                        // === CORREÇÃO DO LOCK DO CROMIUM NO DISCLOUD ===
-                        `--user-data-dir=${chromiumProfilePath}`,
 
                         // === CORREÇÃO DO VAZAMENTO WEBRTC (CRÍTICO!) ===
                         '--disable-webrtc',
