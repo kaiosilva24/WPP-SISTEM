@@ -24,6 +24,10 @@ function App() {
     const [showConfigModal, setShowConfigModal] = useState(false);
     const [showWebhookModal, setShowWebhookModal] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
+    const [showGroupBlacklistModal, setShowGroupBlacklistModal] = useState(false);
+    const [groupBlacklistAccountId, setGroupBlacklistAccountId] = useState(null);
+    const [groupBlacklistData, setGroupBlacklistData] = useState({ groups: [], blacklisted: [] });
+    const [groupBlacklistLoading, setGroupBlacklistLoading] = useState(false);
     const [webhooks, setWebhooks] = useState([]);
     const [newWebhook, setNewWebhook] = useState({ name: '', url: '', method: 'GET' });
     const [qrTimestamps, setQrTimestamps] = useState({});
@@ -1997,42 +2001,82 @@ function App() {
                                     </span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                    {msgPopup === 'group' && (() => {
-                                        const globalGroupState = !accounts.some(a => a.group_enabled === false);
+                                    {msgPopup === 'group' && currentAccountId && (() => {
+                                        const acc = accounts.find(a => a.id === currentAccountId);
+                                        if (!acc) return null;
+                                        const groupState = acc.group_enabled !== false && acc.group_enabled !== 0;
                                         return (
-                                            <button
-                                                style={{
-                                                    background: 'transparent',
-                                                    border: `1px solid ${globalGroupState ? 'rgba(0, 255, 102, 0.4)' : 'rgba(255, 0, 51, 0.4)'}`,
-                                                    color: globalGroupState ? '#00ff66' : '#ff3333',
-                                                    padding: '4px 10px',
-                                                    fontSize: '0.72rem',
-                                                    fontWeight: 'bold',
-                                                    cursor: 'pointer',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '6px',
-                                                    borderRadius: '4px',
-                                                    transition: 'all 0.2s',
-                                                    fontFamily: 'Share Tech Mono, monospace'
-                                                }}
-                                                title={globalGroupState ? 'Desativar Todos os Grupos' : 'Ativar Todos os Grupos'}
-                                                onClick={async () => {
-                                                    const newVal = !globalGroupState;
-                                                    if (accounts.length === 0) return showToast('Nenhuma conta criada', 'warn');
-                                                    await Promise.all(accounts.map(acc =>
-                                                        fetch(`/api/accounts/${acc.id}/config`, {
+                                            <>
+                                                <button
+                                                    style={{
+                                                        background: 'transparent',
+                                                        border: `1px solid ${groupState ? 'rgba(0, 255, 102, 0.4)' : 'rgba(255, 0, 51, 0.4)'}`,
+                                                        color: groupState ? '#00ff66' : '#ff3333',
+                                                        padding: '4px 10px',
+                                                        fontSize: '0.72rem',
+                                                        fontWeight: 'bold',
+                                                        cursor: 'pointer',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px',
+                                                        borderRadius: '4px',
+                                                        transition: 'all 0.2s',
+                                                        fontFamily: 'Share Tech Mono, monospace'
+                                                    }}
+                                                    title={groupState ? `Desativar Grupos para ${acc.name}` : `Ativar Grupos para ${acc.name}`}
+                                                    onClick={async () => {
+                                                        const newVal = !groupState;
+                                                        await fetch(`/api/accounts/${acc.id}/config`, {
                                                             method: 'PUT',
                                                             headers: { 'Content-Type': 'application/json' },
                                                             body: JSON.stringify({ group_enabled: newVal })
-                                                        })
-                                                    ));
-                                                    loadAccounts();
-                                                }}
-                                            >
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-                                                Grupos {globalGroupState ? 'ON' : 'OFF'}
-                                            </button>
+                                                        });
+                                                        loadAccounts();
+                                                        showToast(`Grupos ${newVal ? 'ON' : 'OFF'} para ${acc.name}`, newVal ? 'success' : 'warn');
+                                                    }}
+                                                >
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                                                    Grupos {groupState ? 'ON' : 'OFF'}
+                                                </button>
+                                                <button
+                                                    style={{
+                                                        background: 'rgba(37,211,102,0.08)',
+                                                        border: '1px solid rgba(37,211,102,0.3)',
+                                                        color: '#25D366',
+                                                        padding: '4px 10px',
+                                                        fontSize: '0.72rem',
+                                                        fontWeight: 'bold',
+                                                        cursor: 'pointer',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '5px',
+                                                        borderRadius: '4px',
+                                                        transition: 'all 0.2s',
+                                                        fontFamily: 'Share Tech Mono, monospace'
+                                                    }}
+                                                    title="Selecionar quais grupos ignorar"
+                                                    onClick={async () => {
+                                                        setGroupBlacklistAccountId(acc.id);
+                                                        setGroupBlacklistLoading(true);
+                                                        setShowGroupBlacklistModal(true);
+                                                        try {
+                                                            const [groupsRes, blRes] = await Promise.all([
+                                                                fetch(`/api/accounts/${acc.id}/groups`),
+                                                                fetch(`/api/accounts/${acc.id}/group-blacklist`)
+                                                            ]);
+                                                            const groups = groupsRes.ok ? await groupsRes.json() : [];
+                                                            const blacklisted = blRes.ok ? await blRes.json() : [];
+                                                            setGroupBlacklistData({ groups, blacklisted });
+                                                        } catch (e) {
+                                                            showToast('Erro ao carregar grupos', 'error');
+                                                        }
+                                                        setGroupBlacklistLoading(false);
+                                                    }}
+                                                >
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+                                                    Selecionar
+                                                </button>
+                                            </>
                                         );
                                     })()}
                                     <button
@@ -2861,6 +2905,109 @@ function App() {
                                     transition: 'all 0.2s'
                                 }}
                             >⎋ Sair da Sessão</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Seleção de Grupos (Blacklist) */}
+            {showGroupBlacklistModal && (
+                <div className="modal show" style={{ zIndex: 5000 }}>
+                    <div className="modal-content" style={{ maxWidth: '600px' }}>
+                        <div className="modal-header">
+                            <h2>🚫 Selecionar Grupos — {accounts.find(a => a.id === groupBlacklistAccountId)?.name}</h2>
+                            <button className="modal-close" onClick={() => setShowGroupBlacklistModal(false)}>×</button>
+                        </div>
+                        <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                            <p style={{ color: '#aaa', fontSize: '0.85rem', marginBottom: '14px', lineHeight: '1.5' }}>
+                                Grupos <strong style={{ color: '#25D366' }}>marcados</strong> recebem respostas automáticas.<br />
+                                Grupos <strong style={{ color: '#ff4466' }}>desmarcados</strong> serão ignorados pelo bot para sempre nesta conta.
+                            </p>
+                            {groupBlacklistLoading ? (
+                                <div style={{ textAlign: 'center', padding: '30px', color: '#888' }}>
+                                    ⏳ Carregando grupos do WhatsApp...
+                                </div>
+                            ) : groupBlacklistData.groups.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '30px', color: '#888' }}>
+                                    Nenhum grupo encontrado. A conta precisa estar <strong>ativa</strong>.
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    {groupBlacklistData.groups.map(g => {
+                                        const isBlocked = groupBlacklistData.blacklisted.some(b => b.group_jid === g.jid);
+                                        return (
+                                            <div
+                                                key={g.jid}
+                                                onClick={async () => {
+                                                    try {
+                                                        if (isBlocked) {
+                                                            await fetch(`/api/accounts/${groupBlacklistAccountId}/group-blacklist`, {
+                                                                method: 'DELETE',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ group_jid: g.jid })
+                                                            });
+                                                            setGroupBlacklistData(prev => ({
+                                                                ...prev,
+                                                                blacklisted: prev.blacklisted.filter(b => b.group_jid !== g.jid)
+                                                            }));
+                                                        } else {
+                                                            await fetch(`/api/accounts/${groupBlacklistAccountId}/group-blacklist`, {
+                                                                method: 'POST',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ group_jid: g.jid, group_name: g.name })
+                                                            });
+                                                            setGroupBlacklistData(prev => ({
+                                                                ...prev,
+                                                                blacklisted: [...prev.blacklisted, { group_jid: g.jid, group_name: g.name }]
+                                                            }));
+                                                        }
+                                                    } catch (e) {
+                                                        showToast('Erro ao atualizar blacklist', 'error');
+                                                    }
+                                                }}
+                                                style={{
+                                                    display: 'flex', alignItems: 'center', gap: '12px',
+                                                    padding: '10px 14px', cursor: 'pointer',
+                                                    background: isBlocked ? 'rgba(255,0,51,0.05)' : 'rgba(37,211,102,0.05)',
+                                                    border: `1px solid ${isBlocked ? 'rgba(255,0,51,0.15)' : 'rgba(37,211,102,0.15)'}`,
+                                                    borderRadius: '8px',
+                                                    transition: 'all 0.2s'
+                                                }}
+                                            >
+                                                <div style={{
+                                                    width: '20px', height: '20px', borderRadius: '4px',
+                                                    border: `2px solid ${isBlocked ? '#ff4466' : '#25D366'}`,
+                                                    background: isBlocked ? 'transparent' : '#25D366',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    flexShrink: 0, transition: 'all 0.2s'
+                                                }}>
+                                                    {!isBlocked && (
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3"><path d="M20 6L9 17l-5-5" /></svg>
+                                                    )}
+                                                </div>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{
+                                                        fontWeight: 600, fontSize: '0.85rem',
+                                                        color: isBlocked ? '#ff4466' : 'var(--text-primary)',
+                                                        textDecoration: isBlocked ? 'line-through' : 'none',
+                                                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                                                    }}>{g.name}</div>
+                                                    {g.participants > 0 && (
+                                                        <div style={{ fontSize: '0.7rem', color: '#666' }}>{g.participants} participantes</div>
+                                                    )}
+                                                </div>
+                                                <span style={{
+                                                    fontSize: '0.65rem', fontWeight: 'bold',
+                                                    padding: '2px 8px', borderRadius: '4px',
+                                                    background: isBlocked ? 'rgba(255,0,51,0.15)' : 'rgba(37,211,102,0.15)',
+                                                    color: isBlocked ? '#ff4466' : '#25D366',
+                                                    fontFamily: 'Share Tech Mono, monospace'
+                                                }}>{isBlocked ? 'BLOQUEADO' : 'ATIVO'}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

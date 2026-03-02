@@ -257,6 +257,18 @@ class DatabaseManager {
           )
       `);
 
+      // Tabela de blacklist de grupos (por conta — ignora grupos específicos)
+      await client.query(`
+          CREATE TABLE IF NOT EXISTS account_group_blacklist (
+              id SERIAL PRIMARY KEY,
+              account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+              group_jid TEXT NOT NULL,
+              group_name TEXT,
+              created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(account_id, group_jid)
+          )
+      `);
+
       console.log('✅ Database tables initialized (PostgreSQL)');
     } catch (error) {
       console.error('❌ Error initializing tables:', error);
@@ -708,6 +720,62 @@ class DatabaseManager {
       await client.query('UPDATE account_configs SET webhook_id = NULL WHERE webhook_id = $1', [id]);
 
       return res.rowCount > 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  // ==========================================
+  // MÉTODOS - BLACKLIST DE GRUPOS (POR CONTA)
+  // ==========================================
+
+  async getGroupBlacklist(accountId) {
+    const client = await this.pool.connect();
+    try {
+      const res = await client.query(
+        'SELECT * FROM account_group_blacklist WHERE account_id = $1 ORDER BY group_name ASC',
+        [accountId]
+      );
+      return res.rows;
+    } finally {
+      client.release();
+    }
+  }
+
+  async addGroupToBlacklist(accountId, groupJid, groupName) {
+    const client = await this.pool.connect();
+    try {
+      const res = await client.query(
+        'INSERT INTO account_group_blacklist (account_id, group_jid, group_name) VALUES ($1, $2, $3) ON CONFLICT (account_id, group_jid) DO NOTHING RETURNING *',
+        [accountId, groupJid, groupName || null]
+      );
+      return res.rows[0] || null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async removeGroupFromBlacklist(accountId, groupJid) {
+    const client = await this.pool.connect();
+    try {
+      const res = await client.query(
+        'DELETE FROM account_group_blacklist WHERE account_id = $1 AND group_jid = $2',
+        [accountId, groupJid]
+      );
+      return res.rowCount > 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  async isGroupBlacklisted(accountId, groupJid) {
+    const client = await this.pool.connect();
+    try {
+      const res = await client.query(
+        'SELECT 1 FROM account_group_blacklist WHERE account_id = $1 AND group_jid = $2',
+        [accountId, groupJid]
+      );
+      return res.rows.length > 0;
     } finally {
       client.release();
     }

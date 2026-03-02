@@ -288,7 +288,7 @@ class MessageHandler {
      * Verifica bloqueios PRIMÁRIOS (Scams, Blacklist, Próprio Número, etc)
      * Retorna false APENAS para mensagens que devem ser definitivamente ignoradas e NUNCA respondidas
      */
-    shouldProcessMessage(session, contactId, messageBody) {
+    async shouldProcessMessage(session, contactId, messageBody) {
         const config = this.getAccountConfig(session);
 
         // Ignora mensagens do próprio número
@@ -318,6 +318,16 @@ class MessageHandler {
                 logger.info(session.accountName, `🚫 Grupos desativados — ignorando mensagem de ${contactId}`);
                 return false;
             }
+
+            // Verifica blacklist individual de grupos para esta conta
+            try {
+                const db = require('../database/DatabaseManager');
+                const isBlocked = await db.isGroupBlacklisted(session.accountId, contactId);
+                if (isBlocked) {
+                    logger.info(session.accountName, `🚫 Grupo na blacklist — ignorando ${contactId}`);
+                    return false;
+                }
+            } catch (e) { /* silencia erros de DB para não travar fila */ }
         }
 
         return true; // Mensagem válida para ir para a Fila Pessoal ou Processamento
@@ -494,7 +504,7 @@ class MessageHandler {
 
         try {
             // 1. Filtros Absolutos (Bots, Grupos Desativados, Próprio Número)
-            if (!this.shouldProcessMessage(session, contactId, message)) {
+            if (!await this.shouldProcessMessage(session, contactId, message)) {
                 return;
             }
 

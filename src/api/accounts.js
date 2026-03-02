@@ -669,3 +669,76 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+
+// ==========================================
+// ROTAS DE BLACKLIST DE GRUPOS (POR CONTA)
+// ==========================================
+
+/**
+ * Lista todos os grupos de uma conta WhatsApp ativa
+ */
+router.get('/:id/groups', async (req, res) => {
+    try {
+        const session = sessionManager.getSession(req.params.id);
+        if (!session || !session.client || session.status !== 'ready') {
+            return res.status(400).json({ error: 'Sessão não está ativa' });
+        }
+
+        const chats = await session.client.getChats();
+        const groups = chats
+            .filter(c => c.isGroup)
+            .map(c => ({
+                jid: c.id._serialized,
+                name: c.name || 'Grupo sem nome',
+                participants: c.participants ? c.participants.length : 0
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+        res.json(groups);
+    } catch (error) {
+        console.error('Erro ao listar grupos:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * Lista a blacklist de grupos de uma conta
+ */
+router.get('/:id/group-blacklist', async (req, res) => {
+    try {
+        const blacklist = await db.getGroupBlacklist(req.params.id);
+        res.json(blacklist);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * Adiciona um grupo à blacklist
+ */
+router.post('/:id/group-blacklist', async (req, res) => {
+    try {
+        const { group_jid, group_name } = req.body;
+        if (!group_jid) return res.status(400).json({ error: 'group_jid obrigatório' });
+
+        const result = await db.addGroupToBlacklist(req.params.id, group_jid, group_name);
+        res.json({ success: true, entry: result });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * Remove um grupo da blacklist
+ */
+router.delete('/:id/group-blacklist', async (req, res) => {
+    try {
+        const { group_jid } = req.body;
+        if (!group_jid) return res.status(400).json({ error: 'group_jid obrigatório' });
+
+        await db.removeGroupFromBlacklist(req.params.id, group_jid);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
