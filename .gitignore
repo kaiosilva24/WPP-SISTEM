@@ -59,7 +59,7 @@ CrashpadMetr*
 # Pastas desnecessárias
 Nova pasta/
 recordings/
-media/
+# media/ — NÃO ignorar, pois o Discloud precisa das mídias no repositório
 
 # Banco de dados local (Discloud usa PostgreSQL externo)
 database.sqlite

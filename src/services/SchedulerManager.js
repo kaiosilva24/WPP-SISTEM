@@ -9,6 +9,8 @@ class SchedulerManager {
         this.isRunning = false;
         // Tempo em ms para checar a agenda
         this.POLL_INTERVAL = 60000;
+        // Evita spam de log de erro de webhook — guarda última falha por conta
+        this.lastWebhookError = new Map();
     }
 
     start() {
@@ -55,6 +57,12 @@ class SchedulerManager {
                 const session = sessionManager.getSession(id);
                 // Se o WhatsAppSession.js pausou a conta mas o start() reinicia as variáveis, ou se status de sessionManager === paused
                 const isCurrentlyActive = session && (session.status === 'ready' || session.status === 'qr' || session.status === 'authenticated') && !session.isPaused;
+
+                // ✅ Se a sessão JÁ está ready e rodando, não faz nada (evita loop infinito de webhook)
+                if (isTimeToRun && isCurrentlyActive) {
+                    // Conta já ativa e no horário — nada a fazer
+                    continue;
+                }
 
                 // Não ativamos se a conta estiver como 'disconnected' no banco de dados
                 // Isso significa que ela foi intencionalmente parada pelo usuário ou pelo reinício do sistema
@@ -131,8 +139,10 @@ class SchedulerManager {
             }
         }
 
-        // Tenta acionar Webhook se configurado
-        if (webhook_id) {
+        // Tenta acionar Webhook se configurado — mas SÓ se a sessão NÃO está já conectada
+        // (evita disparar webhook repetidamente quando a conta já está online)
+        const isSessionAlreadyReady = session && (session.status === 'ready' || session.status === 'authenticated') && !session.isPaused;
+        if (webhook_id && !isSessionAlreadyReady) {
             await this.triggerWebhook(webhook_id, name);
         }
 
@@ -219,14 +229,21 @@ class SchedulerManager {
             await axios({
                 method: method,
                 url: hook.url,
-                timeout: 5000
+                timeout: 15000   // 15s — dispositivo pode demorar a responder
             });
             logger.info('Scheduler', `[${accountName}] Webhook resolvido (${hook.url}). Esperando IP estabilizar...`);
+            // Limpa flag de erro anterior se o webhook funcionou
+            this.lastWebhookError.delete(accountName);
 
             // Aguarda alguns segundos estabilizar a rotação do IP antes de conectar o whatsapp para n derrubar QR
             await new Promise(resolve => setTimeout(resolve, 5000));
         } catch (error) {
-            logger.error('Scheduler', `[${accountName}] Falha ao acionar Webhook de troca de IP: ${error.message}`);
+            // Evita spam de log: só loga erro se não logou na última checagem
+            const lastErr = this.lastWebhookError.get(accountName);
+            if (!lastErr || Date.now() - lastErr > 300000) { // Loga no máximo 1x a cada 5 min
+                logger.error('Scheduler', `[${accountName}] Falha ao acionar Webhook de troca de IP: ${error.message}`);
+                this.lastWebhookError.set(accountName, Date.now());
+            }
         }
     }
 }
