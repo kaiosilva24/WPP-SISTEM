@@ -328,11 +328,13 @@ class WhatsAppSession extends EventEmitter {
         ];
         for (const lockFile of lockFiles) {
             try {
-                if (fs.existsSync(lockFile)) {
-                    fs.unlinkSync(lockFile);
-                    console.log('[CHROMIUM] Lock file removido:', p.basename(lockFile));
-                }
-            } catch (e) { /* ignora */ }
+                // IMPORTANTE: No Linux, SingletonLock é um SYMLINK.
+                // fs.existsSync() retorna FALSE para symlinks quebrados (quando container reinicia).
+                // fs.lstatSync() detecta o symlink mesmo quebrado, permitindo removê-lo.
+                fs.lstatSync(lockFile);
+                fs.unlinkSync(lockFile);
+                console.log('[CHROMIUM] Lock file removido:', p.basename(lockFile));
+            } catch (e) { /* arquivo não existe — ok */ }
         }
     }
 

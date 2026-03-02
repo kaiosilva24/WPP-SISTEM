@@ -50,7 +50,8 @@ class SchedulerManager {
             for (const account of accounts) {
                 const { id, name, scheduled_start_time, scheduled_end_time, proxy_group_id, webhook_id } = account;
 
-                // Só processa contas que têm ambos os horários configurados
+                // Só processa contas que têm agendamento ATIVADO e ambos os horários configurados
+                if (!account.schedule_enabled) continue;
                 if (!scheduled_start_time || !scheduled_end_time) continue;
 
                 const isTimeToRun = this.isTimeInRange(currentTime, scheduled_start_time, scheduled_end_time);

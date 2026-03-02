@@ -165,7 +165,8 @@ class DatabaseManager {
         `ALTER TABLE account_configs ADD COLUMN IF NOT EXISTS proxy_group_id TEXT`,
         `ALTER TABLE account_configs ADD COLUMN IF NOT EXISTS webhook_id INTEGER`,
         `ALTER TABLE account_configs ADD COLUMN IF NOT EXISTS scheduled_start_time TEXT`,
-        `ALTER TABLE account_configs ADD COLUMN IF NOT EXISTS scheduled_end_time TEXT`
+        `ALTER TABLE account_configs ADD COLUMN IF NOT EXISTS scheduled_end_time TEXT`,
+        `ALTER TABLE account_configs ADD COLUMN IF NOT EXISTS schedule_enabled INTEGER DEFAULT 0`
       ];
       for (const sql of newCols) {
         try { await client.query(sql); } catch (e) { /* coluna já existe */ }
@@ -441,7 +442,7 @@ class DatabaseManager {
       'standby_watch_status_enabled', 'standby_watch_status_prob',
       'standby_watch_status_min_contacts', 'standby_watch_status_max_contacts',
       'standby_watch_status_min_delay', 'standby_watch_status_max_delay',
-      'proxy_group_id', 'webhook_id', 'scheduled_start_time', 'scheduled_end_time'
+      'proxy_group_id', 'webhook_id', 'scheduled_start_time', 'scheduled_end_time', 'schedule_enabled'
     ];
 
     for (const field of allowedFields) {
