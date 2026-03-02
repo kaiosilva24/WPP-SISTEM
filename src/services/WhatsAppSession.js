@@ -1,4 +1,4 @@
-﻿const { Client, LocalAuth } = require('whatsapp-web.js');
+﻿const { Client, RemoteAuth } = require('whatsapp-web.js');
 const path = require('path');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const proxyChain = require('proxy-chain');
@@ -225,22 +225,24 @@ class WhatsAppSession extends EventEmitter {
             // 3. Configuração do Cliente
             const startVisible = this.runtimeOptions && this.runtimeOptions.visible;
 
-            const dataPath = path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.wwebjs_auth_aquecimento', `session-${this.accountId}`);
-            const chromiumProfilePath = dataPath + '_chromium_profile';
+            const dataPath = path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.wwebjs_auth_aquecimento');
 
             // === CRITICO: Limpa lock files do Chromium antes de iniciar ==
-            // Sem isso, reinicializacoes ficam travadas esperando lock liberado
-            // LocalAuth usa: dataPath/session-account-{id} como userDataDir
-            const localAuthUserDataDir = path.join(dataPath, `session-account-${this.accountId}`);
-            await this.cleanUserDataDir(localAuthUserDataDir);
-            await this.cleanUserDataDir(chromiumProfilePath);
+            // RemoteAuth usa: dataPath/RemoteAuth-account-{id} como userDataDir
+            const remoteAuthDir = path.join(dataPath, `RemoteAuth-account-${this.accountId}`);
+            await this.cleanUserDataDir(remoteAuthDir);
+
+            // Conecta ao pool PostgreSQL para salvar sessão
+            const db = require('../database/DatabaseManager');
+            const PostgresSessionStore = require('./PostgresSessionStore');
+            const store = new PostgresSessionStore(db.pool);
 
             const clientConfig = {
-                authStrategy: new LocalAuth({
+                authStrategy: new RemoteAuth({
                     clientId: `account-${this.accountId}`,
-                    // Usando caminho correto para cada sistema operacional
-                    // Linux (DisCloud): HOME, Windows: USERPROFILE
-                    dataPath: dataPath
+                    dataPath: dataPath,
+                    store: store,
+                    backupSyncIntervalMs: 300000 // Salva sessão no PostgreSQL a cada 5 minutos
                 }),
                 requestTimeout: 120000,  // 2 minutos para ambientes cloud
                 puppeteer: {
@@ -264,8 +266,7 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-gpu',
                         '--disable-features=IsolateOrigins,site-per-process',
 
-                        // === CORRECAO DO LOCK DO CROMIUM ===
-                        `--user-data-dir=${chromiumProfilePath}`,
+                        // RemoteAuth gerencia o --user-data-dir internamente
 
                         // === CORREÇÃO DO VAZAMENTO WEBRTC (CRÍTICO!) ===
                         '--disable-webrtc',
