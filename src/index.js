@@ -98,12 +98,22 @@ async function main() {
                 for (const account of accountsToResume) {
                     try {
                         logger.info(null, `  ▶ Retomando sessão: ${account.name} (ID: ${account.id})...`);
-                        // Pequeno delay entre inicializações para não sobrecarregar recursos
-                        await new Promise(resolve => setTimeout(resolve, 3000));
+                        // Delay de 60s entre inicializações — dois Chromium precisam de tempo para estabilizar
+                        await new Promise(resolve => setTimeout(resolve, 60000));
                         await sessionManager.createSession(account.id, account.name, { visible: false });
                     } catch (err) {
-                        logger.warn(null, `  ⚠ Falha ao retomar ${account.name}: ${err.message}`);
-                        await db.updateAccountStatus(account.id, 'disconnected');
+                        const errMsg = err?.message || err?.toString?.() || 'Erro desconhecido';
+                        logger.warn(null, `  ⚠ Falha ao retomar ${account.name}: ${errMsg}. Tentando novamente em 30s...`);
+                        // Retry: espera 30s e tenta de novo
+                        await new Promise(resolve => setTimeout(resolve, 30000));
+                        try {
+                            await sessionManager.createSession(account.id, account.name, { visible: false });
+                            logger.info(null, `  ✅ Retry bem sucedido para ${account.name}`);
+                        } catch (err2) {
+                            const errMsg2 = err2?.message || err2?.toString?.() || 'Erro desconhecido';
+                            logger.warn(null, `  ❌ Retry falhou para ${account.name}: ${errMsg2}`);
+                            await db.updateAccountStatus(account.id, 'disconnected');
+                        }
                     }
                 }
             } else {

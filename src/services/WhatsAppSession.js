@@ -305,8 +305,11 @@ class WhatsAppSession extends EventEmitter {
             await this.client.initialize();
 
         } catch (error) {
-            logger.error(this.accountName, `Erro fatal na inicialização: ${error.message}`);
-            require('fs').writeFileSync(path.join(__dirname, '..', '..', 'error_launch.log'), `Error: ${error.message}\nStack: ${error.stack}\n`);
+            const errMsg = error?.message || error?.toString?.() || JSON.stringify(error) || 'Erro desconhecido';
+            logger.error(this.accountName, `Erro fatal na inicialização: ${errMsg}`);
+            try {
+                require('fs').writeFileSync(path.join(__dirname, '..', '..', 'error_launch.log'), `Error: ${errMsg}\nStack: ${error?.stack || 'N/A'}\nFull: ${JSON.stringify(error, Object.getOwnPropertyNames(error || {}), 2)}\n`);
+            } catch (e) { /* ignore write errors */ }
             this.status = 'error';
             this.emit('error', error);
             throw error;
