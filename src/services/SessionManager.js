@@ -10,12 +10,36 @@ class SessionManager extends EventEmitter {
     constructor() {
         super();
         this.sessions = new Map(); // accountId => WhatsAppSession
+        this._locks = new Map();   // accountId => Promise (lock de create/destroy)
+    }
+
+    /**
+     * Aguarda lock existente e cria um novo para a conta
+     * Impede create/destroy simultâneos na mesma conta
+     */
+    async _acquireLock(accountId) {
+        const key = String(accountId);
+        // Espera o lock anterior terminar (se existir)
+        while (this._locks.has(key)) {
+            try { await this._locks.get(key); } catch (e) { /* ignore */ }
+        }
+        // Cria um novo lock (promise que será resolvida quando a operação terminar)
+        let releaseLock;
+        const lockPromise = new Promise(resolve => { releaseLock = resolve; });
+        this._locks.set(key, lockPromise);
+        return releaseLock;
+    }
+
+    _releaseLock(accountId, releaseFn) {
+        this._locks.delete(String(accountId));
+        releaseFn();
     }
 
     /**
      * Cria uma nova sessão
      */
     async createSession(accountId, accountName, options = {}) {
+        const releaseLock = await this._acquireLock(accountId);
         try {
             if (this.sessions.has(accountId)) {
                 logger.warn(null, `Sessão ${accountName} (ID: ${accountId}) já existe`);
@@ -81,8 +105,10 @@ class SessionManager extends EventEmitter {
             return session;
 
         } catch (error) {
-            logger.error(null, `Erro ao criar sessão ${accountName}: ${error.message}`);
+            logger.error(null, `Erro ao criar sessão ${accountName}: ${error?.message || error}`);
             throw error;
+        } finally {
+            this._releaseLock(accountId, releaseLock);
         }
     }
 
@@ -172,20 +198,25 @@ class SessionManager extends EventEmitter {
      * @param {boolean} options.clearAuth  - Se true, faz logout e apaga o token (ao deletar conta)
      */
     async destroySession(accountId, { intentional = true, clearAuth = false } = {}) {
-        const session = this.getSession(accountId); // Typecast proof
-        if (session) {
-            session.intentionalStop = intentional;
-            await session.destroy(clearAuth);
+        const releaseLock = await this._acquireLock(accountId);
+        try {
+            const session = this.getSession(accountId); // Typecast proof
+            if (session) {
+                session.intentionalStop = intentional;
+                await session.destroy(clearAuth);
 
-            // Procura a chave exata para deletar do Map
-            for (const key of this.sessions.keys()) {
-                if (String(key) === String(accountId)) {
-                    this.sessions.delete(key);
-                    break;
+                // Procura a chave exata para deletar do Map
+                for (const key of this.sessions.keys()) {
+                    if (String(key) === String(accountId)) {
+                        this.sessions.delete(key);
+                        break;
+                    }
                 }
+                await db.updateAccountStatus(accountId, 'disconnected');
+                logger.info(null, `Sessão ${accountId} removida`);
             }
-            await db.updateAccountStatus(accountId, 'disconnected');
-            logger.info(null, `Sessão ${accountId} removida`);
+        } finally {
+            this._releaseLock(accountId, releaseLock);
         }
     }
 

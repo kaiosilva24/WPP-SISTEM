@@ -1119,6 +1119,7 @@ class WhatsAppSession extends EventEmitter {
         try {
             this.stopPresenceLoop();
             this.stopStandbyLoop();
+            this.stopContactSyncLoop();
 
             if (this.client) {
                 logger.info(this.accountName, `Destruindo sessão... (clearAuth: ${clearAuth})`);

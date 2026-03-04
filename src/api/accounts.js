@@ -503,10 +503,14 @@ router.post('/:id/start', async (req, res) => {
                 console.log(`[API] Sessão já está ativa para conta ${account.id}`);
                 return res.json({ message: 'Sessão já está ativa' });
             }
-            // Destrói só se não estiver pronta (ex: em erro, qr pendente)
+            // Se está inicializando ou autenticando, NÃO interrompe — causa crash
+            if (existingSession.status === 'initializing' || existingSession.status === 'authenticated') {
+                console.log(`[API] Sessão ${account.id} está em '${existingSession.status}' — aguarde concluir`);
+                return res.status(409).json({ error: `Sessão está ${existingSession.status === 'authenticated' ? 'autenticando' : 'inicializando'}. Aguarde concluir antes de reiniciar.` });
+            }
+            // Destrói só se em estado final (ex: em erro, qr pendente)
             console.log(`[API] Destruindo sessão em estado ${existingSession.status} para conta ${account.id}`);
             await sessionManager.destroySession(account.id, { intentional: true, clearAuth: false });
-            await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
         // Verificação de Conflito de Proxy
