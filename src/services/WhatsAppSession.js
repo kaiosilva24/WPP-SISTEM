@@ -250,7 +250,7 @@ class WhatsAppSession extends EventEmitter {
                     headless: process.platform === 'linux' ? true : !startVisible,
                     // Adiciona single-process para ambientes com recursos limitados
                     bypassCSP: true,
-                    protocolTimeout: 180000,  // 3 minutos — evita timeout em ambientes cloud com recursos limitados
+                    protocolTimeout: 600000,  // 10 minutos — o inject WAPI é muito pesado no Discloud
                     args: [
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
