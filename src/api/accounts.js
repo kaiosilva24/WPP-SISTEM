@@ -488,29 +488,29 @@ router.delete('/media/:filename', (req, res) => {
  */
 router.post('/:id/start', async (req, res) => {
     try {
-        const { visible } = req.body;
+        const { visible, force } = req.body;
         const account = await db.getAccount(req.params.id);
         if (!account) {
             return res.status(404).json({ error: 'Conta não encontrada' });
         }
 
-        console.log(`[API] Iniciando sessão para conta ${account.id} (${account.name}) [Visible: ${visible}]`);
+        console.log(`[API] Iniciando sessão para conta ${account.id} (${account.name}) [Visible: ${visible}] [Force: ${!!force}]`);
 
-        // Se sessão já existe e está pronta, não destrói
+        // Se sessão já existe
         const existingSession = sessionManager.getSession(account.id);
         if (existingSession) {
-            if (existingSession.status === 'ready') {
+            if (existingSession.status === 'ready' && !force) {
                 console.log(`[API] Sessão já está ativa para conta ${account.id}`);
                 return res.json({ message: 'Sessão já está ativa' });
             }
-            // Se está inicializando ou autenticando, NÃO interrompe — causa crash
-            if (existingSession.status === 'initializing' || existingSession.status === 'authenticated') {
-                console.log(`[API] Sessão ${account.id} está em '${existingSession.status}' — aguarde concluir`);
-                return res.status(409).json({ error: `Sessão está ${existingSession.status === 'authenticated' ? 'autenticando' : 'inicializando'}. Aguarde concluir antes de reiniciar.` });
+            // Se está inicializando ou autenticando, só permite com force=true
+            if ((existingSession.status === 'initializing' || existingSession.status === 'authenticated') && !force) {
+                console.log(`[API] Sessão ${account.id} está em '${existingSession.status}' — aguarde concluir (ou use force)`);
+                return res.status(409).json({ error: `Sessão está ${existingSession.status === 'authenticated' ? 'autenticando' : 'inicializando'}. Aguarde concluir ou use o botão de reconectar.` });
             }
-            // Destrói só se em estado final (ex: em erro, qr pendente)
-            console.log(`[API] Destruindo sessão em estado ${existingSession.status} para conta ${account.id}`);
-            await sessionManager.destroySession(account.id, { intentional: true, clearAuth: false });
+            // Destrói sessão existente (force ou estado terminal)
+            console.log(`[API] Destruindo sessão em estado ${existingSession.status} para conta ${account.id} [force=${!!force}]`);
+            await sessionManager.destroySession(account.id, { intentional: true, clearAuth: !!force });
         }
 
         // Verificação de Conflito de Proxy
@@ -543,6 +543,55 @@ router.post('/:id/start', async (req, res) => {
         res.json({ message: 'Sessão iniciada/agendada' });
     } catch (error) {
         console.error(`[API] Erro ao iniciar sessão:`, error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * POST /api/accounts/:id/clear-session
+ * Limpa a sessão salva no PostgreSQL (força novo QR code)
+ * Usar quando a sessão está corrompida e a conta fica presa em 'authenticated'
+ */
+router.post('/:id/clear-session', async (req, res) => {
+    try {
+        const account = await db.getAccount(req.params.id);
+        if (!account) {
+            return res.status(404).json({ error: 'Conta não encontrada' });
+        }
+
+        // Destrói sessão ativa se existir
+        const existingSession = sessionManager.getSession(account.id);
+        if (existingSession) {
+            console.log(`[API] Destruindo sessão ativa para limpar sessão da conta ${account.id}`);
+            try {
+                existingSession.intentionalStop = true;
+                await existingSession.destroy(true);
+            } catch (e) {
+                console.warn(`[API] Erro ao destruir sessão (ignorado):`, e.message);
+            }
+            // Remove do SessionManager
+            for (const key of sessionManager.sessions.keys()) {
+                if (String(key) === String(account.id)) {
+                    sessionManager.sessions.delete(key);
+                    break;
+                }
+            }
+        }
+
+        // Deleta sessão do PostgreSQL diretamente
+        const sessionId = `RemoteAuth-account-${account.id}`;
+        try {
+            await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [sessionId]);
+            console.log(`[API] Sessão '${sessionId}' deletada do PostgreSQL`);
+        } catch (dbErr) {
+            console.error(`[API] Erro ao deletar sessão do PostgreSQL:`, dbErr.message);
+        }
+
+        await db.updateAccountStatus(account.id, 'disconnected');
+
+        res.json({ message: `Sessão da conta ${account.name} limpa. Clique em Iniciar para escanear novo QR code.` });
+    } catch (error) {
+        console.error(`[API] Erro ao limpar sessão:`, error);
         res.status(500).json({ error: error.message });
     }
 });
