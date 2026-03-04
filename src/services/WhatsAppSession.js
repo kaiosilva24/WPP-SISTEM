@@ -918,15 +918,18 @@ class WhatsAppSession extends EventEmitter {
                 return hasEnoughDigits && hasNoLetters;
             }).length;
 
+            // Só loga quando o count muda (evita spam nos logs)
+            if (this.unsavedContactsCount !== count) {
+                logger.info(this.accountName, `📱 vCard: ${count} contato(s) não salvos nos chats.`);
+            }
             this.unsavedContactsCount = count;
-            logger.info(this.accountName, `📱 vCard: ${count} contato(s) não salvos nos chats.`);
 
         } catch (error) {
             logger.warn(this.accountName, `Falha na sincronização silenciosa de contatos: ${error.message}`);
         } finally {
-            // Repete a cada 60 a 90 segundos
+            // Repete a cada 5 a 8 minutos (intervalo maior para não sobrecarregar Puppeteer)
             if (this.status === 'ready') {
-                const nextDelay = Math.floor(Math.random() * (90000 - 60000 + 1)) + 60000;
+                const nextDelay = Math.floor(Math.random() * (480000 - 300000 + 1)) + 300000;
                 this.contactSyncTimeout = setTimeout(() => this.executeContactSync(), nextDelay);
             }
         }
