@@ -98,9 +98,38 @@ async function main() {
                 for (const account of accountsToResume) {
                     try {
                         logger.info(null, `  ▶ Retomando sessão: ${account.name} (ID: ${account.id})...`);
-                        // Delay de 60s entre inicializações — dois Chromium precisam de tempo para estabilizar
-                        await new Promise(resolve => setTimeout(resolve, 60000));
-                        await sessionManager.createSession(account.id, account.name, { visible: false });
+                        const session = await sessionManager.createSession(account.id, account.name, { visible: false });
+
+                        // CRÍTICO: Espera o evento 'ready' antes de iniciar a próxima conta
+                        // O createSession() retorna ANTES do inject completar (inject roda async)
+                        // Se iniciarmos outra conta antes, elas competem por CPU e a primeira dá timeout
+                        if (session && session.status !== 'ready') {
+                            logger.info(null, `  ⏳ Aguardando conta ${account.name} ficar pronta (max 5min)...`);
+                            await new Promise((resolve) => {
+                                const timeout = setTimeout(() => {
+                                    logger.warn(null, `  ⚠ Timeout esperando ${account.name} ficar pronta. Continuando...`);
+                                    resolve();
+                                }, 300000); // 5 minutos max
+
+                                const checkReady = () => {
+                                    if (session.status === 'ready') {
+                                        clearTimeout(timeout);
+                                        logger.info(null, `  ✅ Conta ${account.name} pronta! Prosseguindo...`);
+                                        resolve();
+                                    } else if (session.status === 'error' || session.status === 'destroyed') {
+                                        clearTimeout(timeout);
+                                        logger.warn(null, `  ⚠ Conta ${account.name} falhou (${session.status}). Continuando...`);
+                                        resolve();
+                                    }
+                                };
+
+                                session.on('ready', () => { clearTimeout(timeout); resolve(); });
+                                session.on('error', () => { clearTimeout(timeout); resolve(); });
+
+                                // Checa imediatamente caso já tenha mudado
+                                checkReady();
+                            });
+                        }
                     } catch (err) {
                         const errMsg = err?.message || err?.toString?.() || 'Erro desconhecido';
                         logger.warn(null, `  ⚠ Falha ao retomar ${account.name}: ${errMsg}. Tentando novamente em 30s...`);
