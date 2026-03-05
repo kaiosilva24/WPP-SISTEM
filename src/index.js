@@ -95,51 +95,23 @@ async function main() {
             if (accountsToResume.length > 0) {
                 logger.info(null, `🔄 Retomando ${accountsToResume.length} sessão(ões) previamente ativas...`);
 
-                for (const account of accountsToResume) {
+                // Ordena por ID crescente — contas mais antigas/estáveis primeiro
+                accountsToResume.sort((a, b) => a.id - b.id);
+
+                for (let i = 0; i < accountsToResume.length; i++) {
+                    const account = accountsToResume[i];
                     try {
-                        logger.info(null, `  ▶ Retomando sessão: ${account.name} (ID: ${account.id})...`);
-                        const session = await sessionManager.createSession(account.id, account.name, { visible: false });
-
-                        // CRÍTICO: Espera o evento 'ready' antes de iniciar a próxima conta
-                        // O createSession() retorna ANTES do inject completar (inject roda async)
-                        // Se iniciarmos outra conta antes, elas competem por CPU e a primeira dá timeout
-                        if (session && session.status !== 'ready') {
-                            logger.info(null, `  ⏳ Aguardando conta ${account.name} ficar pronta (max 12min)...`);
-                            await new Promise((resolve) => {
-                                let resolved = false;
-                                const safeResolve = () => { if (!resolved) { resolved = true; resolve(); } };
-
-                                const timeout = setTimeout(() => {
-                                    logger.warn(null, `  ⚠ Timeout de 12min esperando ${account.name} ficar pronta. Continuando...`);
-                                    safeResolve();
-                                }, 720000); // 12 minutos max (maior que protocolTimeout de 10min)
-
-                                // Polling a cada 30s para logar status e detectar estados finais
-                                const pollInterval = setInterval(() => {
-                                    const s = session.status;
-                                    logger.info(null, `  🔄 Status atual de ${account.name}: ${s}`);
-                                    if (s === 'ready' || s === 'error' || s === 'destroyed' || s === 'disconnected' || s === 'auth_failure') {
-                                        clearInterval(pollInterval);
-                                        clearTimeout(timeout);
-                                        if (s === 'ready') {
-                                            logger.info(null, `  ✅ Conta ${account.name} pronta! Prosseguindo...`);
-                                        } else {
-                                            logger.warn(null, `  ⚠ Conta ${account.name} terminou em estado '${s}'. Continuando...`);
-                                        }
-                                        safeResolve();
-                                    }
-                                }, 30000);
-
-                                session.on('ready', () => { clearInterval(pollInterval); clearTimeout(timeout); safeResolve(); });
-                                session.on('error', () => { clearInterval(pollInterval); clearTimeout(timeout); safeResolve(); });
-                                session.on('disconnected', () => { clearInterval(pollInterval); clearTimeout(timeout); safeResolve(); });
-
-                                // Checa imediatamente caso já tenha mudado
-                                if (session.status === 'ready') {
-                                    clearInterval(pollInterval); clearTimeout(timeout); safeResolve();
-                                }
-                            });
+                        // Delay entre contas (exceto a primeira)
+                        if (i > 0) {
+                            logger.info(null, `  ⏳ Aguardando 45s antes de iniciar próxima conta...`);
+                            await new Promise(resolve => setTimeout(resolve, 45000));
                         }
+
+                        logger.info(null, `  ▶ Retomando sessão: ${account.name} (ID: ${account.id})...`);
+                        await sessionManager.createSession(account.id, account.name, { visible: false });
+                        // NÃO bloqueia esperando 'ready' — o inject roda em background
+                        // O evento 'ready' será capturado pelo setupClientEvents normalmente
+                        logger.info(null, `  ✅ Sessão ${account.name} criada. Inject em andamento (background)...`);
                     } catch (err) {
                         const errMsg = err?.message || err?.toString?.() || 'Erro desconhecido';
                         logger.warn(null, `  ⚠ Falha ao retomar ${account.name}: ${errMsg}. Tentando novamente em 30s...`);
