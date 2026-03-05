@@ -104,30 +104,40 @@ async function main() {
                         // O createSession() retorna ANTES do inject completar (inject roda async)
                         // Se iniciarmos outra conta antes, elas competem por CPU e a primeira dá timeout
                         if (session && session.status !== 'ready') {
-                            logger.info(null, `  ⏳ Aguardando conta ${account.name} ficar pronta (max 5min)...`);
+                            logger.info(null, `  ⏳ Aguardando conta ${account.name} ficar pronta (max 12min)...`);
                             await new Promise((resolve) => {
+                                let resolved = false;
+                                const safeResolve = () => { if (!resolved) { resolved = true; resolve(); } };
+
                                 const timeout = setTimeout(() => {
-                                    logger.warn(null, `  ⚠ Timeout esperando ${account.name} ficar pronta. Continuando...`);
-                                    resolve();
-                                }, 300000); // 5 minutos max
+                                    logger.warn(null, `  ⚠ Timeout de 12min esperando ${account.name} ficar pronta. Continuando...`);
+                                    safeResolve();
+                                }, 720000); // 12 minutos max (maior que protocolTimeout de 10min)
 
-                                const checkReady = () => {
-                                    if (session.status === 'ready') {
+                                // Polling a cada 30s para logar status e detectar estados finais
+                                const pollInterval = setInterval(() => {
+                                    const s = session.status;
+                                    logger.info(null, `  🔄 Status atual de ${account.name}: ${s}`);
+                                    if (s === 'ready' || s === 'error' || s === 'destroyed' || s === 'disconnected' || s === 'auth_failure') {
+                                        clearInterval(pollInterval);
                                         clearTimeout(timeout);
-                                        logger.info(null, `  ✅ Conta ${account.name} pronta! Prosseguindo...`);
-                                        resolve();
-                                    } else if (session.status === 'error' || session.status === 'destroyed') {
-                                        clearTimeout(timeout);
-                                        logger.warn(null, `  ⚠ Conta ${account.name} falhou (${session.status}). Continuando...`);
-                                        resolve();
+                                        if (s === 'ready') {
+                                            logger.info(null, `  ✅ Conta ${account.name} pronta! Prosseguindo...`);
+                                        } else {
+                                            logger.warn(null, `  ⚠ Conta ${account.name} terminou em estado '${s}'. Continuando...`);
+                                        }
+                                        safeResolve();
                                     }
-                                };
+                                }, 30000);
 
-                                session.on('ready', () => { clearTimeout(timeout); resolve(); });
-                                session.on('error', () => { clearTimeout(timeout); resolve(); });
+                                session.on('ready', () => { clearInterval(pollInterval); clearTimeout(timeout); safeResolve(); });
+                                session.on('error', () => { clearInterval(pollInterval); clearTimeout(timeout); safeResolve(); });
+                                session.on('disconnected', () => { clearInterval(pollInterval); clearTimeout(timeout); safeResolve(); });
 
                                 // Checa imediatamente caso já tenha mudado
-                                checkReady();
+                                if (session.status === 'ready') {
+                                    clearInterval(pollInterval); clearTimeout(timeout); safeResolve();
+                                }
                             });
                         }
                     } catch (err) {
