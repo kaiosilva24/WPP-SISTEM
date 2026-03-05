@@ -607,11 +607,6 @@ class WhatsAppSession extends EventEmitter {
 
         // Pronto
         this.client.on('ready', async () => {
-            if (this.isPaused) {
-                logger.info(this.accountName, `Sinal de READY ignorado (Modo Avião/Pausa ativo).`);
-                return;
-            }
-
             this.status = 'ready';
             this.qrCode = null;
             this.qrTimestamp = null; // Limpa o timestamp
@@ -625,6 +620,12 @@ class WhatsAppSession extends EventEmitter {
             logger.info(this.accountName, `Conectado como: ${info.pushname} (${info.wid.user})`);
 
             this.emit('ready', info);
+
+            // Se estava pausada, marca como ready mas não inicia loops (resume() cuidará disso)
+            if (this.isPaused) {
+                logger.info(this.accountName, `Ready recebido durante pausa. Loops serão iniciados ao retomar.`);
+                return;
+            }
 
             // Inicia Presence Keep-Alive constante e simulação ociosa se ativada
             this.startPresenceLoop();
@@ -1104,9 +1105,12 @@ class WhatsAppSession extends EventEmitter {
         this.isPaused = false;
         this.status = 'ready'; // Retorna ao fluxo normal
 
+        // Reinicia TODOS os loops (não só presença)
         this.startPresenceLoop();
+        this.startStandbyLoop();
+        this.startContactSyncLoop();
 
-        logger.info(this.accountName, '▶️ Conta RETOMADA. Interações online.');
+        logger.info(this.accountName, '▶️ Conta RETOMADA. Interações online (todos os loops ativos).');
         this.emit('status', 'ready');
         return true;
     }
