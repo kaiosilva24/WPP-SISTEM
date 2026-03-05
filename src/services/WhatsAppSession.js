@@ -604,10 +604,38 @@ class WhatsAppSession extends EventEmitter {
             logger.authenticated(this.accountName);
             this.emit('authenticated');
 
+            // DIAGNÓSTICO: Monitora o estado interno do WhatsApp Web a cada 15s
+            // Isso nos dirá exatamente POR QUE o inject trava (AppState, socket, versão)
+            if (this._diagnosticInterval) clearInterval(this._diagnosticInterval);
+            this._diagnosticInterval = setInterval(async () => {
+                if (this.status !== 'authenticated' || !this.client?.pupPage) {
+                    clearInterval(this._diagnosticInterval);
+                    this._diagnosticInterval = null;
+                    return;
+                }
+                try {
+                    const diag = await this.client.pupPage.evaluate(() => {
+                        const result = {};
+                        try { result.appState = window.AuthStore?.AppState?.state || 'N/A'; } catch (e) { result.appState = 'ERRO'; }
+                        try { result.version = window.Debug?.VERSION || 'N/A'; } catch (e) { result.version = 'ERRO'; }
+                        try { result.hasSynced = window.AuthStore?.AppState?.hasSynced; } catch (e) { result.hasSynced = 'ERRO'; }
+                        try { result.socketState = window.AuthStore?.Socket?.state || 'N/A'; } catch (e) { result.socketState = 'N/A'; }
+                        try { result.isOnline = navigator.onLine; } catch (e) { result.isOnline = 'N/A'; }
+                        try { result.connRef = !!window.AuthStore?.Conn?.ref; } catch (e) { result.connRef = 'N/A'; }
+                        return result;
+                    }).catch(() => ({ appState: 'PAGE_ERROR', version: '?', hasSynced: '?', socketState: '?', isOnline: '?' }));
+
+                    logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | Version=${diag.version} | hasSynced=${diag.hasSynced} | Socket=${diag.socketState} | Online=${diag.isOnline} | ConnRef=${diag.connRef}`);
+                } catch (e) {
+                    logger.warn(this.accountName, `🔬 [DIAG] Erro ao ler estado: ${e.message}`);
+                }
+            }, 15000); // A cada 15 segundos
+
             // AUTO-RECOVERY: Se o inject não completar em 3 min, destrói e limpa sessão
             // O inject do whatsapp-web.js espera AppState mudar de 'OPENING' — se trava, nunca chega 'ready'
             if (this._injectRecoveryTimeout) clearTimeout(this._injectRecoveryTimeout);
             this._injectRecoveryTimeout = setTimeout(async () => {
+                if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
                 if (this.status === 'authenticated') {
                     logger.warn(this.accountName, `⚠️ Inject preso por 3 min. Auto-recovery: destruindo sessão e limpando PostgreSQL...`);
                     try {
@@ -629,10 +657,14 @@ class WhatsAppSession extends EventEmitter {
 
         // Pronto
         this.client.on('ready', async () => {
-            // Cancela o auto-recovery — o inject completou com sucesso!
+            // Cancela o auto-recovery e diagnósticos — o inject completou com sucesso!
             if (this._injectRecoveryTimeout) {
                 clearTimeout(this._injectRecoveryTimeout);
                 this._injectRecoveryTimeout = null;
+            }
+            if (this._diagnosticInterval) {
+                clearInterval(this._diagnosticInterval);
+                this._diagnosticInterval = null;
             }
 
             this.status = 'ready';
