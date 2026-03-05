@@ -603,10 +603,38 @@ class WhatsAppSession extends EventEmitter {
 
             logger.authenticated(this.accountName);
             this.emit('authenticated');
+
+            // AUTO-RECOVERY: Se o inject não completar em 3 min, destrói e limpa sessão
+            // O inject do whatsapp-web.js espera AppState mudar de 'OPENING' — se trava, nunca chega 'ready'
+            if (this._injectRecoveryTimeout) clearTimeout(this._injectRecoveryTimeout);
+            this._injectRecoveryTimeout = setTimeout(async () => {
+                if (this.status === 'authenticated') {
+                    logger.warn(this.accountName, `⚠️ Inject preso por 3 min. Auto-recovery: destruindo sessão e limpando PostgreSQL...`);
+                    try {
+                        // Destrói a sessão atual
+                        await this.destroy(true);
+                        // Limpa sessão do PostgreSQL para forçar novo QR
+                        const db = require('../database/DatabaseManager');
+                        const sessionId = `RemoteAuth-account-${this.accountId}`;
+                        await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [sessionId]);
+                        logger.warn(this.accountName, `🗑️ Sessão '${sessionId}' removida do PostgreSQL. Próximo start exigirá novo QR.`);
+                        await db.updateAccountStatus(this.accountId, 'disconnected');
+                        this.emit('inject_timeout');
+                    } catch (err) {
+                        logger.error(this.accountName, `Erro no auto-recovery: ${err.message}`);
+                    }
+                }
+            }, 180000); // 3 minutos
         });
 
         // Pronto
         this.client.on('ready', async () => {
+            // Cancela o auto-recovery — o inject completou com sucesso!
+            if (this._injectRecoveryTimeout) {
+                clearTimeout(this._injectRecoveryTimeout);
+                this._injectRecoveryTimeout = null;
+            }
+
             this.status = 'ready';
             this.qrCode = null;
             this.qrTimestamp = null; // Limpa o timestamp
