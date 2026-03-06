@@ -460,6 +460,26 @@ function App() {
         }
     };
 
+    // Limpa sessão salva e força novo QR code
+    const clearSession = async (id) => {
+        if (!confirm('⚠️ Isso vai APAGAR a sessão salva desta conta.\n\nVocê precisará escanear o QR code novamente.\n\nDeseja continuar?')) return;
+        try {
+            showToast('Limpando sessão...', 'info');
+            const response = await fetch(`/api/accounts/${id}/clear-session`, {
+                method: 'POST'
+            });
+            if (response.ok) {
+                showToast('✅ Sessão limpa! Clique Iniciar para gerar QR novo.', 'success');
+                loadAccounts();
+            } else {
+                throw new Error('Erro ao limpar sessão');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Erro ao limpar sessão', 'error');
+        }
+    };
+
     const handleViewBrowser = async (account) => {
         if (['ready', 'qr', 'initializing', 'authenticated'].includes(account.status)) {
             if (confirm('⚠️ Para visualizar o navegador, é necessário reiniciar a sessão.\n\nO processo será interrompido e reiniciado com o navegador aberto.\nDeseja continuar?')) {
@@ -1293,6 +1313,9 @@ function App() {
                                     )}
                                     <button className="btn-action icon-only" onClick={() => restartAccount(account.id)} title="Reiniciar / Recarregar QR">
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="23,4 23,10 17,10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
+                                    </button>
+                                    <button className="btn-action icon-only" onClick={() => clearSession(account.id)} title="Novo QR Code (limpa sessão salva)">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="3" height="3" rx="0.5" /><rect x="20" y="14" width="1" height="3" /><rect x="14" y="20" width="3" height="1" /><rect x="19" y="19" width="2" height="2" rx="0.5" /></svg>
                                     </button>
                                     <button className="btn-action icon-only" title="Ver Navegador" onClick={() => handleViewBrowser(account)}>
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="2" /><path d="M12 5C7 5 3 8.6 3 12s4 7 9 7 9-3.6 9-7-4-7-9-7z" /><line x1="3" y1="12" x2="21" y2="12" /></svg>
