@@ -631,23 +631,42 @@ class WhatsAppSession extends EventEmitter {
                 }
             }, 15000); // A cada 15 segundos
 
-            // AUTO-RECOVERY: Se o inject não completar em 3 min, destrói instância Puppeteer
-            // MAS PRESERVA a sessão salva no PostgreSQL — próximo start restaura SEM QR CODE!
+            // AUTO-RECOVERY INTELIGENTE: 
+            // 1ª falha → preserva sessão PostgreSQL (tenta de novo sem QR)
+            // 2ª falha → limpa PostgreSQL (gera novo QR na próxima)
             if (this._injectRecoveryTimeout) clearTimeout(this._injectRecoveryTimeout);
+            if (!this._injectFailCount) this._injectFailCount = 0;
             this._injectRecoveryTimeout = setTimeout(async () => {
                 if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
                 if (this.status === 'authenticated') {
-                    logger.warn(this.accountName, `⚠️ Inject preso por 3 min. Destruindo instância, sessão PostgreSQL PRESERVADA.`);
-                    try {
-                        // destroy(false) = fecha browser MAS preserva sessão salva no PostgreSQL
-                        await this.destroy(false);
-                        const db = require('../database/DatabaseManager');
-                        await db.updateAccountStatus(this.accountId, 'disconnected');
-                        logger.info(this.accountName, `💡 Sessão preservada. Próximo start restaura sem QR code.`);
-                        this.emit('inject_timeout');
-                    } catch (err) {
-                        logger.error(this.accountName, `Erro no auto-recovery: ${err.message}`);
+                    this._injectFailCount++;
+                    const db = require('../database/DatabaseManager');
+
+                    if (this._injectFailCount >= 2) {
+                        // 2ª+ falha: sessão provavelmente corrompida — limpa PostgreSQL
+                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x seguidas. Sessão corrompida — limpando PostgreSQL...`);
+                        try {
+                            await this.destroy(true); // clearAuth=true
+                            const sessionId = `RemoteAuth-account-${this.accountId}`;
+                            await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [sessionId]);
+                            logger.warn(this.accountName, `🗑️ Sessão limpa. Próximo start gerará novo QR code.`);
+                            await db.updateAccountStatus(this.accountId, 'disconnected');
+                            this._injectFailCount = 0; // Reset para próximo ciclo
+                        } catch (err) {
+                            logger.error(this.accountName, `Erro no auto-recovery: ${err.message}`);
+                        }
+                    } else {
+                        // 1ª falha: tenta preservar — pode ser problema temporário
+                        logger.warn(this.accountName, `⚠️ Inject preso por 3 min (tentativa ${this._injectFailCount}/2). Preservando sessão...`);
+                        try {
+                            await this.destroy(false); // clearAuth=false, preserva sessão
+                            await db.updateAccountStatus(this.accountId, 'disconnected');
+                            logger.info(this.accountName, `💡 Sessão preservada. Tente iniciar novamente (sem QR). Se falhar de novo, limpa automaticamente.`);
+                        } catch (err) {
+                            logger.error(this.accountName, `Erro no auto-recovery: ${err.message}`);
+                        }
                     }
+                    this.emit('inject_timeout');
                 }
             }, 180000); // 3 minutos
         });
@@ -665,6 +684,7 @@ class WhatsAppSession extends EventEmitter {
             }
 
             this.status = 'ready';
+            this._injectFailCount = 0; // Reset contador — sessão funcionou!
             this.qrCode = null;
             this.qrTimestamp = null; // Limpa o timestamp
             this.stats.startTime = Date.now();
