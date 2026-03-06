@@ -639,20 +639,21 @@ class WhatsAppSession extends EventEmitter {
                         try { result.socketState = window.AuthStore?.Socket?.state || 'N/A'; } catch (e) { result.socketState = 'N/A'; }
                         try { result.isOnline = navigator.onLine; } catch (e) { result.isOnline = 'N/A'; }
                         try { result.connRef = !!window.AuthStore?.Conn?.ref; } catch (e) { result.connRef = 'N/A'; }
-                        // Verifica se o Store está disponível (inject completou?)
-                        try { result.storeAvailable = !!(window.Store && window.Store.Chat); } catch (e) { result.storeAvailable = false; }
+                        // Verifica se INJECT DA LIB completou (WWebJS = funções da lib whatsapp-web.js)
+                        // Store nativo do WhatsApp sempre carrega — WWebJS só existe se inject completou
+                        try { result.wwebjsReady = !!(window.WWebJS && window.WWebJS.sendMessage); } catch (e) { result.wwebjsReady = false; }
                         return result;
-                    }).catch(() => ({ appState: 'PAGE_ERROR', version: '?', hasSynced: '?', socketState: '?', isOnline: '?', storeAvailable: false }));
+                    }).catch(() => ({ appState: 'PAGE_ERROR', version: '?', hasSynced: '?', socketState: '?', isOnline: '?', wwebjsReady: false }));
 
-                    logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | Version=${diag.version} | hasSynced=${diag.hasSynced} | Socket=${diag.socketState} | Online=${diag.isOnline} | ConnRef=${diag.connRef} | Store=${diag.storeAvailable}`);
+                    logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | Version=${diag.version} | hasSynced=${diag.hasSynced} | Socket=${diag.socketState} | Online=${diag.isOnline} | ConnRef=${diag.connRef} | WWebJS=${diag.wwebjsReady}`);
 
-                    // AUTO-FIX: WhatsApp conectado+sincronizado mas inject não completou?
-                    // Isso acontece quando a página navega durante o inject — destrói o contexto JS
-                    // mas a conexão real está ok. Re-injetar os módulos resolve!
-                    if (diag.appState === 'CONNECTED' && diag.hasSynced === true && !diag.storeAvailable) {
+                    // AUTO-FIX: WhatsApp conectado+sincronizado mas WWebJS não foi injetado?
+                    // Store nativo do WhatsApp pode existir, mas WWebJS (funções da lib) não
+                    // Isso acontece quando a página navega durante o inject
+                    if (diag.appState === 'CONNECTED' && diag.hasSynced === true && !diag.wwebjsReady) {
                         this._connectedSyncedCount++;
                         if (this._connectedSyncedCount >= 2) { // 30 segundos nesse estado
-                            logger.warn(this.accountName, `🔄 [AUTO-FIX] WhatsApp CONECTADO mas inject falhou. Tentando re-inject dos módulos Store...`);
+                            logger.warn(this.accountName, `🔄 [AUTO-FIX] WhatsApp CONECTADO mas WWebJS não injetado. Tentando re-inject...`);
                             this._connectedSyncedCount = 0; // Reset para evitar loops
                             try {
                                 await this.client.inject();
@@ -661,7 +662,7 @@ class WhatsAppSession extends EventEmitter {
                                 logger.warn(this.accountName, `⚠️ [AUTO-FIX] Re-inject falhou: ${injectErr.message}. Aguardando auto-recovery...`);
                             }
                         } else {
-                            logger.info(this.accountName, `🔍 [DIAG] CONNECTED+hasSynced=true detectado (${this._connectedSyncedCount}/2). Aguardando confirmação...`);
+                            logger.info(this.accountName, `🔍 [DIAG] CONNECTED+hasSynced=true mas WWebJS ausente (${this._connectedSyncedCount}/2). Aguardando confirmação...`);
                         }
                     } else {
                         this._connectedSyncedCount = 0; // Reset se estado mudou
