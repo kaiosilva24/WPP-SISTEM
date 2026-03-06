@@ -604,9 +604,10 @@ class WhatsAppSession extends EventEmitter {
             logger.authenticated(this.accountName);
             this.emit('authenticated');
 
-            // DIAGNÓSTICO: Monitora o estado interno do WhatsApp Web a cada 15s
-            // Isso nos dirá exatamente POR QUE o inject trava (AppState, socket, versão)
+            // DIAGNÓSTICO + AUTO-FIX: Monitora estado interno do WhatsApp Web a cada 15s
+            // Se detectar CONNECTED+hasSynced=true mas inject não completou, tenta re-inject!
             if (this._diagnosticInterval) clearInterval(this._diagnosticInterval);
+            this._connectedSyncedCount = 0; // Conta quantas vezes viu CONNECTED+hasSynced
             this._diagnosticInterval = setInterval(async () => {
                 if (this.status !== 'authenticated' || !this.client?.pupPage) {
                     clearInterval(this._diagnosticInterval);
@@ -622,10 +623,33 @@ class WhatsAppSession extends EventEmitter {
                         try { result.socketState = window.AuthStore?.Socket?.state || 'N/A'; } catch (e) { result.socketState = 'N/A'; }
                         try { result.isOnline = navigator.onLine; } catch (e) { result.isOnline = 'N/A'; }
                         try { result.connRef = !!window.AuthStore?.Conn?.ref; } catch (e) { result.connRef = 'N/A'; }
+                        // Verifica se o Store está disponível (inject completou?)
+                        try { result.storeAvailable = !!(window.Store && window.Store.Chat); } catch (e) { result.storeAvailable = false; }
                         return result;
-                    }).catch(() => ({ appState: 'PAGE_ERROR', version: '?', hasSynced: '?', socketState: '?', isOnline: '?' }));
+                    }).catch(() => ({ appState: 'PAGE_ERROR', version: '?', hasSynced: '?', socketState: '?', isOnline: '?', storeAvailable: false }));
 
-                    logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | Version=${diag.version} | hasSynced=${diag.hasSynced} | Socket=${diag.socketState} | Online=${diag.isOnline} | ConnRef=${diag.connRef}`);
+                    logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | Version=${diag.version} | hasSynced=${diag.hasSynced} | Socket=${diag.socketState} | Online=${diag.isOnline} | ConnRef=${diag.connRef} | Store=${diag.storeAvailable}`);
+
+                    // AUTO-FIX: WhatsApp conectado+sincronizado mas inject não completou?
+                    // Isso acontece quando a página navega durante o inject — destrói o contexto JS
+                    // mas a conexão real está ok. Re-injetar os módulos resolve!
+                    if (diag.appState === 'CONNECTED' && diag.hasSynced === true && !diag.storeAvailable) {
+                        this._connectedSyncedCount++;
+                        if (this._connectedSyncedCount >= 2) { // 30 segundos nesse estado
+                            logger.warn(this.accountName, `🔄 [AUTO-FIX] WhatsApp CONECTADO mas inject falhou. Tentando re-inject dos módulos Store...`);
+                            this._connectedSyncedCount = 0; // Reset para evitar loops
+                            try {
+                                await this.client.inject();
+                                logger.info(this.accountName, `✅ [AUTO-FIX] Re-inject completou! Evento 'ready' deve disparar agora.`);
+                            } catch (injectErr) {
+                                logger.warn(this.accountName, `⚠️ [AUTO-FIX] Re-inject falhou: ${injectErr.message}. Aguardando auto-recovery...`);
+                            }
+                        } else {
+                            logger.info(this.accountName, `🔍 [DIAG] CONNECTED+hasSynced=true detectado (${this._connectedSyncedCount}/2). Aguardando confirmação...`);
+                        }
+                    } else {
+                        this._connectedSyncedCount = 0; // Reset se estado mudou
+                    }
                 } catch (e) {
                     logger.warn(this.accountName, `🔬 [DIAG] Erro ao ler estado: ${e.message}`);
                 }
