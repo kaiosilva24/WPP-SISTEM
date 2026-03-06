@@ -98,11 +98,26 @@ async function main() {
                 // Ordena por ID crescente — contas mais antigas/estáveis primeiro
                 accountsToResume.sort((a, b) => a.id - b.id);
 
+                // Rastreia proxies já em uso neste boot para evitar conflito
+                const usedProxies = new Set();
+
                 for (let i = 0; i < accountsToResume.length; i++) {
                     const account = accountsToResume[i];
+
+                    // VERIFICAÇÃO DE CONFLITO DE PROXY NO STARTUP
+                    const proxyKey = account.proxy_ip && account.proxy_port
+                        ? `${account.proxy_ip.trim()}:${String(account.proxy_port).trim()}`
+                        : null;
+
+                    if (proxyKey && usedProxies.has(proxyKey)) {
+                        logger.warn(null, `  ⛔ PULANDO ${account.name}: Proxy ${proxyKey} já está em uso por outra conta neste boot.`);
+                        await db.updateAccountStatus(account.id, 'disconnected');
+                        continue;
+                    }
+
                     try {
                         // Delay entre contas (exceto a primeira)
-                        if (i > 0) {
+                        if (i > 0 && usedProxies.size > 0) {
                             logger.info(null, `  ⏳ Aguardando 45s antes de iniciar próxima conta...`);
                             await new Promise(resolve => setTimeout(resolve, 45000));
                         }
@@ -112,19 +127,13 @@ async function main() {
                         // NÃO bloqueia esperando 'ready' — o inject roda em background
                         // O evento 'ready' será capturado pelo setupClientEvents normalmente
                         logger.info(null, `  ✅ Sessão ${account.name} criada. Inject em andamento (background)...`);
+
+                        // Marca proxy como em uso
+                        if (proxyKey) usedProxies.add(proxyKey);
                     } catch (err) {
                         const errMsg = err?.message || err?.toString?.() || 'Erro desconhecido';
-                        logger.warn(null, `  ⚠ Falha ao retomar ${account.name}: ${errMsg}. Tentando novamente em 30s...`);
-                        // Retry: espera 30s e tenta de novo
-                        await new Promise(resolve => setTimeout(resolve, 30000));
-                        try {
-                            await sessionManager.createSession(account.id, account.name, { visible: false });
-                            logger.info(null, `  ✅ Retry bem sucedido para ${account.name}`);
-                        } catch (err2) {
-                            const errMsg2 = err2?.message || err2?.toString?.() || 'Erro desconhecido';
-                            logger.warn(null, `  ❌ Retry falhou para ${account.name}: ${errMsg2}`);
-                            await db.updateAccountStatus(account.id, 'disconnected');
-                        }
+                        logger.warn(null, `  ⚠ Falha ao retomar ${account.name}: ${errMsg}. Marcando como disconnected.`);
+                        await db.updateAccountStatus(account.id, 'disconnected');
                     }
                 }
             } else {
