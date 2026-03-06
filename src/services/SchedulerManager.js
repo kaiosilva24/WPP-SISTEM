@@ -65,9 +65,9 @@ class SchedulerManager {
                     continue;
                 }
 
-                // Não ativamos se a conta estiver como 'disconnected' no banco de dados
-                // Isso significa que ela foi intencionalmente parada pelo usuário ou pelo reinício do sistema
-                if (isTimeToRun && !isCurrentlyActive && account.status !== 'disconnected') {
+                // Não ativamos se está em estado de 'error' (ex: proxy derrubado)
+                // Contas 'disconnected' com schedule_enabled DEVEM ser ativadas normalmente
+                if (isTimeToRun && !isCurrentlyActive && account.status !== 'error') {
                     // Está na hora de rodar as mensagens (conta deve estar ativa) -> Chama Resume / Inicializa
                     logger.info('Scheduler', `[${name}] Dentro do horário agendado (${scheduled_start_time} - ${scheduled_end_time}). Ativando...`);
                     await this.activateAccount(account);

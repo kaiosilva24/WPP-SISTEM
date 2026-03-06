@@ -2418,96 +2418,79 @@ function App() {
                                             <th style={{ textAlign: 'left', padding: '8px' }}>Grupo Proxy</th>
                                             <th style={{ textAlign: 'left', padding: '8px' }}>Webhook/Modo Avião</th>
                                             <th style={{ textAlign: 'left', padding: '8px' }}>Horário (Início - Fim)</th>
-                                            <th style={{ textAlign: 'center', padding: '8px' }}>Ativo</th>
-                                            <th style={{ textAlign: 'right', padding: '8px' }}>Ação</th>
+                                            <th style={{ textAlign: 'center', padding: '8px' }}>Agendado</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {accounts.map(acc => (
-                                            <tr key={acc.id} style={{ borderBottom: '1px solid #222' }}>
-                                                <td style={{ padding: '8px', fontWeight: 'bold' }}>{acc.name}</td>
-                                                <td style={{ padding: '8px' }}>
-                                                    <select id={`sgProxy_${acc.id}`} defaultValue={acc.proxy_group_id || ''} className="form-input" style={{ width: '140px', padding: '6px', fontSize: '0.8rem' }}>
-                                                        <option value="">-- Nenhum --</option>
-                                                        {/* Lista os IPs de proxy e os Grupos já salvos para serem selecionados sem digitar (filtra inválidos como '01') */}
-                                                        {[...new Set([
-                                                            ...accounts.map(a => a.proxy_ip ? (a.proxy_port ? `${a.proxy_ip}:${a.proxy_port}` : a.proxy_ip) : null).filter(Boolean),
-                                                            ...accounts.map(a => a.proxy_group_id).filter(id => id && /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(id))
-                                                        ])].map(ip => (
-                                                            <option key={ip} value={ip}>{ip}</option>
-                                                        ))}
-                                                    </select>
-                                                </td>
-                                                <td style={{ padding: '8px' }}>
-                                                    <select id={`sgHook_${acc.id}`} defaultValue={acc.webhook_id || ''} className="form-input" style={{ width: '160px', padding: '6px', fontSize: '0.8rem' }}>
-                                                        <option value="">-- Nenhum --</option>
-                                                        {webhooks.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                                                    </select>
-                                                </td>
-                                                <td style={{ padding: '8px' }}>
-                                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                                        <input type="time" id={`sgStart_${acc.id}`} defaultValue={acc.scheduled_start_time || ''} className="form-input" style={{ padding: '4px' }} />
-                                                        <span style={{ color: '#666' }}>até</span>
-                                                        <input type="time" id={`sgEnd_${acc.id}`} defaultValue={acc.scheduled_end_time || ''} className="form-input" style={{ padding: '4px' }} />
-                                                    </div>
-                                                </td>
-                                                <td style={{ padding: '8px', textAlign: 'center' }}>
-                                                    <button
-                                                        id={`sgEnabled_${acc.id}`}
-                                                        data-enabled={acc.schedule_enabled ? '1' : '0'}
-                                                        onClick={(e) => {
-                                                            const btn = e.currentTarget;
-                                                            const cur = btn.getAttribute('data-enabled') === '1';
-                                                            btn.setAttribute('data-enabled', cur ? '0' : '1');
-                                                            btn.textContent = cur ? 'OFF' : 'ON';
-                                                            btn.style.background = cur ? 'rgba(255,0,51,0.15)' : 'rgba(37,211,102,0.2)';
-                                                            btn.style.color = cur ? '#ff4466' : '#25D366';
-                                                            btn.style.borderColor = cur ? 'rgba(255,0,51,0.4)' : 'rgba(37,211,102,0.5)';
-                                                        }}
-                                                        style={{
-                                                            padding: '4px 14px', fontSize: '0.75rem', fontWeight: 'bold',
-                                                            border: `1px solid ${acc.schedule_enabled ? 'rgba(37,211,102,0.5)' : 'rgba(255,0,51,0.4)'}`,
-                                                            background: acc.schedule_enabled ? 'rgba(37,211,102,0.2)' : 'rgba(255,0,51,0.15)',
-                                                            color: acc.schedule_enabled ? '#25D366' : '#ff4466',
-                                                            borderRadius: '6px', cursor: 'pointer',
-                                                            fontFamily: 'Orbitron, Share Tech Mono, monospace',
-                                                            letterSpacing: '1px', transition: 'all 0.2s'
-                                                        }}
-                                                    >{acc.schedule_enabled ? 'ON' : 'OFF'}</button>
-                                                </td>
-                                                <td style={{ padding: '8px', textAlign: 'right' }}>
-                                                    <button className="btn btn-sm btn-primary" onClick={async () => {
-                                                        const pGroup = document.getElementById(`sgProxy_${acc.id}`).value;
-                                                        const wh = document.getElementById(`sgHook_${acc.id}`).value;
-                                                        const sStart = document.getElementById(`sgStart_${acc.id}`).value;
-                                                        const sEnd = document.getElementById(`sgEnd_${acc.id}`).value;
-                                                        const enabled = document.getElementById(`sgEnabled_${acc.id}`).getAttribute('data-enabled') === '1' ? 1 : 0;
+                                        {accounts.map(acc => {
+                                            // Função helper para auto-salvar campo individual do agendamento
+                                            const autoSaveScheduleField = async (fields) => {
+                                                try {
+                                                    const res = await fetch(`/api/accounts/${acc.id}/config`, {
+                                                        method: 'PUT',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify(fields)
+                                                    });
+                                                    if (res.ok) {
+                                                        showToast(`${acc.name} atualizado`, 'success');
+                                                        loadAccounts();
+                                                    } else {
+                                                        showToast('Erro ao salvar', 'error');
+                                                    }
+                                                } catch { showToast('Erro de conexão', 'error'); }
+                                            };
 
-                                                        try {
-                                                            const response = await fetch(`/api/accounts/${acc.id}/config`, {
-                                                                method: 'PUT',
-                                                                headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({
-                                                                    proxy_group_id: pGroup || null,
-                                                                    webhook_id: parseInt(wh) || null,
-                                                                    scheduled_start_time: sStart || null,
-                                                                    scheduled_end_time: sEnd || null,
-                                                                    schedule_enabled: enabled
-                                                                })
-                                                            });
-                                                            if (response.ok) {
-                                                                showToast('Agendamento salvo para ' + acc.name, 'success');
-                                                                loadAccounts();
-                                                            } else {
-                                                                showToast('Erro ao salvar', 'error');
-                                                            }
-                                                        } catch (e) {
-                                                            showToast('Erro de conexão ao salvar', 'error');
-                                                        }
-                                                    }}>Salvar</button>
-                                                </td>
-                                            </tr>
-                                        ))}
+                                            return (
+                                                <tr key={acc.id} style={{ borderBottom: '1px solid #222' }}>
+                                                    <td style={{ padding: '8px', fontWeight: 'bold' }}>{acc.name}</td>
+                                                    <td style={{ padding: '8px' }}>
+                                                        <select defaultValue={acc.proxy_group_id || ''} className="form-input" style={{ width: '140px', padding: '6px', fontSize: '0.8rem' }}
+                                                            onChange={(e) => autoSaveScheduleField({ proxy_group_id: e.target.value || null })}>
+                                                            <option value="">-- Nenhum --</option>
+                                                            {[...new Set([
+                                                                ...accounts.map(a => a.proxy_ip ? (a.proxy_port ? `${a.proxy_ip}:${a.proxy_port}` : a.proxy_ip) : null).filter(Boolean),
+                                                                ...accounts.map(a => a.proxy_group_id).filter(id => id && /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(id))
+                                                            ])].map(ip => (
+                                                                <option key={ip} value={ip}>{ip}</option>
+                                                            ))}
+                                                        </select>
+                                                    </td>
+                                                    <td style={{ padding: '8px' }}>
+                                                        <select defaultValue={acc.webhook_id || ''} className="form-input" style={{ width: '160px', padding: '6px', fontSize: '0.8rem' }}
+                                                            onChange={(e) => autoSaveScheduleField({ webhook_id: parseInt(e.target.value) || null })}>
+                                                            <option value="">-- Nenhum --</option>
+                                                            {webhooks.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                                                        </select>
+                                                    </td>
+                                                    <td style={{ padding: '8px' }}>
+                                                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                                            <input type="time" defaultValue={acc.scheduled_start_time || ''} className="form-input" style={{ padding: '4px' }}
+                                                                onBlur={(e) => autoSaveScheduleField({ scheduled_start_time: e.target.value || null })} />
+                                                            <span style={{ color: '#666' }}>até</span>
+                                                            <input type="time" defaultValue={acc.scheduled_end_time || ''} className="form-input" style={{ padding: '4px' }}
+                                                                onBlur={(e) => autoSaveScheduleField({ scheduled_end_time: e.target.value || null })} />
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '8px', textAlign: 'center' }}>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const newEnabled = acc.schedule_enabled ? 0 : 1;
+                                                                await autoSaveScheduleField({ schedule_enabled: newEnabled });
+                                                            }}
+                                                            style={{
+                                                                padding: '4px 14px', fontSize: '0.75rem', fontWeight: 'bold',
+                                                                border: `1px solid ${acc.schedule_enabled ? 'rgba(37,211,102,0.5)' : 'rgba(255,0,51,0.4)'}`,
+                                                                background: acc.schedule_enabled ? 'rgba(37,211,102,0.2)' : 'rgba(255,0,51,0.15)',
+                                                                color: acc.schedule_enabled ? '#25D366' : '#ff4466',
+                                                                borderRadius: '6px', cursor: 'pointer',
+                                                                fontFamily: 'Orbitron, Share Tech Mono, monospace',
+                                                                letterSpacing: '1px', transition: 'all 0.2s'
+                                                            }}
+                                                        >{acc.schedule_enabled ? 'ON' : 'OFF'}</button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
