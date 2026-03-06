@@ -257,6 +257,16 @@ router.put('/:id/config', async (req, res) => {
             await schedulerManager.pauseGroupAccounts(updated.proxy_group_id, updated.proxy_ip, updated.proxy_port, updated.id);
         }
 
+        // Se schedule_enabled foi alterado, dispara verificação imediata do scheduler
+        // Isso garante que conta dentro do horário ativa imediatamente ao colocar ON
+        if (req.body.schedule_enabled !== undefined) {
+            console.log(`[API] schedule_enabled alterado para ${req.body.schedule_enabled}. Disparando check imediato do scheduler...`);
+            // Executa em background (não bloqueia a resposta)
+            schedulerManager.checkSchedules().catch(err => {
+                console.error(`[API] Erro no check imediato do scheduler:`, err.message);
+            });
+        }
+
         console.log(`[API] Config salva com sucesso para conta ${req.params.id}`);
         res.json(updated);
     } catch (error) {
@@ -492,6 +502,15 @@ router.post('/:id/start', async (req, res) => {
         const account = await db.getAccount(req.params.id);
         if (!account) {
             return res.status(404).json({ error: 'Conta não encontrada' });
+        }
+
+        // BLOQUEIO: Se agendamento está ON, não permite início manual
+        // O scheduler controla quando a conta ativa/desativa com base no horário
+        if (account.schedule_enabled) {
+            console.log(`[API] Start manual RECUSADO para conta ${account.id} (${account.name}): schedule_enabled=ON`);
+            return res.status(409).json({
+                error: `⏰ Conta "${account.name}" está com agendamento ATIVO.\n\nO sistema iniciará automaticamente no horário configurado (${account.scheduled_start_time || '??'} - ${account.scheduled_end_time || '??'}).\n\nDesative o agendamento (OFF) para iniciar manualmente.`
+            });
         }
 
         console.log(`[API] Iniciando sessão para conta ${account.id} (${account.name}) [Visible: ${visible}] [Force: ${!!force}]`);
