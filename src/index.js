@@ -72,73 +72,25 @@ async function main() {
 
         // O Scheduler só iniciará DEPOIS que garantirmos que o banco está off
 
-        // Carrega contas existentes do banco de dados e as gerencia conforme seu último status
+        // Carrega contas existentes do banco de dados
         const existingAccounts = await db.getAllAccounts();
         if (existingAccounts.length > 0) {
-            logger.info(null, `Encontradas ${existingAccounts.length} contas no banco de dados. Analisando status...`);
+            logger.info(null, `Encontradas ${existingAccounts.length} contas no banco de dados.`);
 
-            const accountsToResume = [];
-
+            // SEGURANÇA: No deploy/restart, TODAS as contas começam como DESCONECTADAS.
+            // O Scheduler ativará as contas agendadas (schedule_enabled=ON) no horário correto.
+            // Contas sem agendamento devem ser iniciadas manualmente pelo usuário.
+            let resetCount = 0;
             for (const account of existingAccounts) {
-                // Se estava conectada ou autenticada antes, devemos retomar
-                if (account.status === 'ready' || account.status === 'authenticated') {
-                    accountsToResume.push(account);
-                } else {
-                    // Qualquer outro estado (erro, qr, paused, disconnected) vai para OFF (disconnected)
-                    // Para que o sistema inicie limpo e elas não subam sem querer
-                    if (account.status !== 'disconnected') {
-                        await db.updateAccountStatus(account.id, 'disconnected');
-                    }
+                if (account.status !== 'disconnected') {
+                    await db.updateAccountStatus(account.id, 'disconnected');
+                    resetCount++;
                 }
             }
-
-            if (accountsToResume.length > 0) {
-                logger.info(null, `🔄 Retomando ${accountsToResume.length} sessão(ões) previamente ativas...`);
-
-                // Ordena por ID crescente — contas mais antigas/estáveis primeiro
-                accountsToResume.sort((a, b) => a.id - b.id);
-
-                // Rastreia proxies já em uso neste boot para evitar conflito
-                const usedProxies = new Set();
-
-                for (let i = 0; i < accountsToResume.length; i++) {
-                    const account = accountsToResume[i];
-
-                    // VERIFICAÇÃO DE CONFLITO DE PROXY NO STARTUP
-                    const proxyKey = account.proxy_ip && account.proxy_port
-                        ? `${account.proxy_ip.trim()}:${String(account.proxy_port).trim()}`
-                        : null;
-
-                    if (proxyKey && usedProxies.has(proxyKey)) {
-                        logger.warn(null, `  ⛔ PULANDO ${account.name}: Proxy ${proxyKey} já está em uso por outra conta neste boot.`);
-                        await db.updateAccountStatus(account.id, 'disconnected');
-                        continue;
-                    }
-
-                    try {
-                        // Delay entre contas (exceto a primeira)
-                        if (i > 0 && usedProxies.size > 0) {
-                            logger.info(null, `  ⏳ Aguardando 45s antes de iniciar próxima conta...`);
-                            await new Promise(resolve => setTimeout(resolve, 45000));
-                        }
-
-                        logger.info(null, `  ▶ Retomando sessão: ${account.name} (ID: ${account.id})...`);
-                        await sessionManager.createSession(account.id, account.name, { visible: false });
-                        // NÃO bloqueia esperando 'ready' — o inject roda em background
-                        // O evento 'ready' será capturado pelo setupClientEvents normalmente
-                        logger.info(null, `  ✅ Sessão ${account.name} criada. Inject em andamento (background)...`);
-
-                        // Marca proxy como em uso
-                        if (proxyKey) usedProxies.add(proxyKey);
-                    } catch (err) {
-                        const errMsg = err?.message || err?.toString?.() || 'Erro desconhecido';
-                        logger.warn(null, `  ⚠ Falha ao retomar ${account.name}: ${errMsg}. Marcando como disconnected.`);
-                        await db.updateAccountStatus(account.id, 'disconnected');
-                    }
-                }
-            } else {
-                logger.info(null, '🔌 Nenhuma sessão conectada anteriormente. As contas estão no estado DESCONECTADO.');
+            if (resetCount > 0) {
+                logger.info(null, `🔄 ${resetCount} conta(s) foram resetadas para DESCONECTADO após restart.`);
             }
+            logger.info(null, '🔌 Todas as contas estão DESCONECTADAS. O Scheduler ativará as contas agendadas (ON) automaticamente.');
         } else {
             logger.info(null, 'Nenhuma conta encontrada. Use o dashboard para criar novas contas');
         }
