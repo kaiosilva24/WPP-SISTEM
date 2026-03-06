@@ -631,26 +631,43 @@ class WhatsAppSession extends EventEmitter {
                 }
             }, 15000); // A cada 15 segundos
 
-            // AUTO-RECOVERY: Se o inject não completar em 3 min, destrói e limpa sessão
-            // O inject do whatsapp-web.js espera AppState mudar de 'OPENING' — se trava, nunca chega 'ready'
+            // AUTO-RECOVERY: Se o inject não completar em 3 min, destrói a instância
+
+            // mas PRESERVA sessão no PostgreSQL para tentar novamente sem QR
             if (this._injectRecoveryTimeout) clearTimeout(this._injectRecoveryTimeout);
+            if (!this._injectFailCount) this._injectFailCount = 0;
             this._injectRecoveryTimeout = setTimeout(async () => {
                 if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
                 if (this.status === 'authenticated') {
-                    logger.warn(this.accountName, `⚠️ Inject preso por 3 min. Auto-recovery: destruindo sessão e limpando PostgreSQL...`);
-                    try {
-                        // Destrói a sessão atual
-                        await this.destroy(true);
-                        // Limpa sessão do PostgreSQL para forçar novo QR
-                        const db = require('../database/DatabaseManager');
-                        const sessionId = `RemoteAuth-account-${this.accountId}`;
-                        await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [sessionId]);
-                        logger.warn(this.accountName, `🗑️ Sessão '${sessionId}' removida do PostgreSQL. Próximo start exigirá novo QR.`);
-                        await db.updateAccountStatus(this.accountId, 'disconnected');
-                        this.emit('inject_timeout');
-                    } catch (err) {
-                        logger.error(this.accountName, `Erro no auto-recovery: ${err.message}`);
+                    this._injectFailCount++;
+
+                    if (this._injectFailCount >= 3) {
+                        // 3+ falhas consecutivas — limpa PostgreSQL como último recurso
+                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x consecutivas. Limpando sessão do PostgreSQL...`);
+                        try {
+                            await this.destroy(true);
+                            const db = require('../database/DatabaseManager');
+                            const sessionId = `RemoteAuth-account-${this.accountId}`;
+                            await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [sessionId]);
+                            logger.warn(this.accountName, `🗑️ Sessão '${sessionId}' removida. Próximo start exigirá novo QR.`);
+                            await db.updateAccountStatus(this.accountId, 'disconnected');
+                            this._injectFailCount = 0;
+                        } catch (err) {
+                            logger.error(this.accountName, `Erro no auto-recovery: ${err.message}`);
+                        }
+                    } else {
+                        // Primeira/segunda falha — destrói instância mas PRESERVA sessão PostgreSQL
+                        logger.warn(this.accountName, `⚠️ Inject preso por 3 min (tentativa ${this._injectFailCount}/3). Destruindo instância, sessão PostgreSQL PRESERVADA.`);
+                        try {
+                            await this.destroy(false); // false = NÃO limpa auth
+                            const db = require('../database/DatabaseManager');
+                            await db.updateAccountStatus(this.accountId, 'disconnected');
+                            logger.info(this.accountName, `💡 Tente iniciar novamente — a sessão está salva, não precisa de QR.`);
+                        } catch (err) {
+                            logger.error(this.accountName, `Erro no auto-recovery: ${err.message}`);
+                        }
                     }
+                    this.emit('inject_timeout');
                 }
             }, 180000); // 3 minutos
         });
@@ -668,6 +685,7 @@ class WhatsAppSession extends EventEmitter {
             }
 
             this.status = 'ready';
+            this._injectFailCount = 0; // Reset contador de falhas no inject
             this.qrCode = null;
             this.qrTimestamp = null; // Limpa o timestamp
             this.stats.startTime = Date.now();
