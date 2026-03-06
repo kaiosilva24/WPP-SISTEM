@@ -631,22 +631,19 @@ class WhatsAppSession extends EventEmitter {
                 }
             }, 15000); // A cada 15 segundos
 
-            // AUTO-RECOVERY: Se o inject não completar em 3 min, destrói e limpa sessão
-            // O inject do whatsapp-web.js espera AppState mudar de 'OPENING' — se trava, nunca chega 'ready'
+            // AUTO-RECOVERY: Se o inject não completar em 3 min, destrói instância Puppeteer
+            // MAS PRESERVA a sessão salva no PostgreSQL — próximo start restaura SEM QR CODE!
             if (this._injectRecoveryTimeout) clearTimeout(this._injectRecoveryTimeout);
             this._injectRecoveryTimeout = setTimeout(async () => {
                 if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
                 if (this.status === 'authenticated') {
-                    logger.warn(this.accountName, `⚠️ Inject preso por 3 min. Auto-recovery: destruindo sessão e limpando PostgreSQL...`);
+                    logger.warn(this.accountName, `⚠️ Inject preso por 3 min. Destruindo instância, sessão PostgreSQL PRESERVADA.`);
                     try {
-                        // Destrói a sessão atual
-                        await this.destroy(true);
-                        // Limpa sessão do PostgreSQL para forçar novo QR
+                        // destroy(false) = fecha browser MAS preserva sessão salva no PostgreSQL
+                        await this.destroy(false);
                         const db = require('../database/DatabaseManager');
-                        const sessionId = `RemoteAuth-account-${this.accountId}`;
-                        await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [sessionId]);
-                        logger.warn(this.accountName, `🗑️ Sessão '${sessionId}' removida do PostgreSQL. Próximo start exigirá novo QR.`);
                         await db.updateAccountStatus(this.accountId, 'disconnected');
+                        logger.info(this.accountName, `💡 Sessão preservada. Próximo start restaura sem QR code.`);
                         this.emit('inject_timeout');
                     } catch (err) {
                         logger.error(this.accountName, `Erro no auto-recovery: ${err.message}`);
