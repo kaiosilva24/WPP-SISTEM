@@ -310,6 +310,22 @@ class WhatsAppSession extends EventEmitter {
             try {
                 require('fs').writeFileSync(path.join(__dirname, '..', '..', 'error_launch.log'), `Error: ${errMsg}\nStack: ${error?.stack || 'N/A'}\nFull: ${JSON.stringify(error, Object.getOwnPropertyNames(error || {}), 2)}\n`);
             } catch (e) { /* ignore write errors */ }
+
+            // AUTO-CLEAR: Se auth timeout, a sessão no PostgreSQL está corrompida
+            // Limpa automaticamente para gerar QR novo na próxima tentativa
+            const errStr = String(errMsg).toLowerCase();
+            if (errStr.includes('auth timeout') || errStr.includes('auth_timeout')) {
+                logger.warn(this.accountName, `⚠️ Auth timeout = sessão corrompida. Limpando PostgreSQL para gerar QR novo...`);
+                try {
+                    const db = require('../database/DatabaseManager');
+                    const sessionId = `RemoteAuth-account-${this.accountId}`;
+                    await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [sessionId]);
+                    logger.warn(this.accountName, `🗑️ Sessão '${sessionId}' removida. Próximo start gerará QR code NOVO.`);
+                } catch (clearErr) {
+                    logger.error(this.accountName, `Erro ao limpar sessão corrompida: ${clearErr.message}`);
+                }
+            }
+
             this.status = 'error';
             this.emit('error', error);
             throw error;
