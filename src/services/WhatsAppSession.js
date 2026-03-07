@@ -623,14 +623,18 @@ class WhatsAppSession extends EventEmitter {
             // DIAGNÓSTICO + AUTO-FIX: Monitora estado interno do WhatsApp Web a cada 5s
             // Se detectar CONNECTED+hasSynced=true mas inject não completou, tenta re-inject IMEDIATAMENTE!
             if (this._diagnosticInterval) clearInterval(this._diagnosticInterval);
+            if (this._diagnosticTimeout) clearTimeout(this._diagnosticTimeout);
             this._connectedSyncedCount = 0;
+            this._pageErrorCount = 0;
+            this._diagRunning = false;
 
             const runDiagnostic = async () => {
+                if (this._diagRunning) return; // Evita sobreposição
                 if (this.status !== 'authenticated' || !this.client?.pupPage) {
-                    clearInterval(this._diagnosticInterval);
-                    this._diagnosticInterval = null;
+                    if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
                     return;
                 }
+                this._diagRunning = true;
                 try {
                     const diag = await this.client.pupPage.evaluate(() => {
                         const result = {};
@@ -640,46 +644,81 @@ class WhatsAppSession extends EventEmitter {
                         try { result.socketState = window.AuthStore?.Socket?.state || 'N/A'; } catch (e) { result.socketState = 'N/A'; }
                         try { result.isOnline = navigator.onLine; } catch (e) { result.isOnline = 'N/A'; }
                         try { result.connRef = !!window.AuthStore?.Conn?.ref; } catch (e) { result.connRef = 'N/A'; }
-                        // Verifica se INJECT DA LIB completou (WWebJS = funções da lib whatsapp-web.js)
-                        // Store nativo do WhatsApp sempre carrega — WWebJS só existe se inject completou
                         try { result.wwebjsReady = !!(window.WWebJS && window.WWebJS.sendMessage); } catch (e) { result.wwebjsReady = false; }
                         return result;
                     }).catch(() => ({ appState: 'PAGE_ERROR', version: '?', hasSynced: '?', socketState: '?', isOnline: '?', wwebjsReady: false }));
 
-                    logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | Version=${diag.version} | hasSynced=${diag.hasSynced} | Socket=${diag.socketState} | Online=${diag.isOnline} | ConnRef=${diag.connRef} | WWebJS=${diag.wwebjsReady}`);
+                    logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | hasSynced=${diag.hasSynced} | WWebJS=${diag.wwebjsReady}`);
 
-                    // AUTO-FIX: WhatsApp conectado+sincronizado mas WWebJS não foi injetado?
-                    // Store nativo do WhatsApp pode existir, mas WWebJS (funções da lib) não
-                    // Isso acontece quando a página navega durante o inject
-                    if (diag.appState === 'CONNECTED' && diag.hasSynced === true && !diag.wwebjsReady) {
+                    // CASO 1: PAGE_ERROR — página crashou/navegou → recovery imediato
+                    if (diag.appState === 'PAGE_ERROR' || diag.appState === 'ERRO') {
+                        this._pageErrorCount++;
+                        if (this._pageErrorCount >= 2) { // 10s confirmação
+                            logger.error(this.accountName, `💀 [DIAG] Página CRASHOU (${this._pageErrorCount}x). Recovery imediato!`);
+                            clearInterval(this._diagnosticInterval); this._diagnosticInterval = null;
+                            if (this._injectRecoveryTimeout) { clearTimeout(this._injectRecoveryTimeout); this._injectRecoveryTimeout = null; }
+                            this._pageErrorCount = 0;
+                            // Dispara recovery diretamente
+                            this._injectFailCount = (this._injectFailCount || 0) + 1;
+                            const db = require('../database/DatabaseManager');
+                            if (this._injectFailCount >= 2) {
+                                logger.warn(this.accountName, `🗑️ 2ª falha consecutiva. Limpando sessão PostgreSQL...`);
+                                try {
+                                    await this.destroy(true);
+                                    await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [`RemoteAuth-account-${this.accountId}`]);
+                                    await db.updateAccountStatus(this.accountId, 'disconnected');
+                                    logger.warn(this.accountName, `🗑️ Sessão limpa. Próximo start = novo QR.`);
+                                    this._injectFailCount = 0;
+                                } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
+                            } else {
+                                logger.warn(this.accountName, `⚠️ 1ª falha. Preservando sessão e reconectando...`);
+                                try {
+                                    await this.destroy(false);
+                                    await db.updateAccountStatus(this.accountId, 'disconnected');
+                                    if (!this.intentionalStop) {
+                                        logger.info(this.accountName, `🔄 Reconectando em 5s...`);
+                                        setTimeout(() => this.reconnect(), 5000);
+                                    }
+                                } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
+                            }
+                            this.emit('inject_timeout');
+                            this._diagRunning = false;
+                            return;
+                        }
+                    }
+                    // CASO 2: CONNECTED + hasSynced mas WWebJS ausente → re-inject
+                    else if (diag.appState === 'CONNECTED' && diag.hasSynced === true && !diag.wwebjsReady) {
                         this._connectedSyncedCount++;
-                        // Re-inject IMEDIATO na 1ª detecção — não espera confirmação
-                        logger.warn(this.accountName, `🔄 [AUTO-FIX] WhatsApp CONECTADO mas WWebJS não injetado (${this._connectedSyncedCount}x). Re-injetando...`);
+                        this._pageErrorCount = 0;
+                        logger.warn(this.accountName, `🔄 [AUTO-FIX] CONECTADO sem WWebJS (${this._connectedSyncedCount}x). Re-injetando...`);
                         try {
                             await this.client.inject();
-                            logger.info(this.accountName, `✅ [AUTO-FIX] Re-inject completou! Evento 'ready' deve disparar agora.`);
+                            logger.info(this.accountName, `✅ [AUTO-FIX] Re-inject OK! Evento ready deve disparar.`);
                             this._connectedSyncedCount = 0;
                         } catch (injectErr) {
                             logger.warn(this.accountName, `⚠️ [AUTO-FIX] Re-inject falhou (${this._connectedSyncedCount}x): ${injectErr.message}`);
                             if (this._connectedSyncedCount >= 3) {
-                                logger.error(this.accountName, `❌ [AUTO-FIX] 3 re-injects falharam. Aguardando recovery timeout...`);
+                                logger.error(this.accountName, `❌ 3 re-injects falharam. Aguardando recovery...`);
                                 this._connectedSyncedCount = 0;
                             }
                         }
-                    } else {
-                        this._connectedSyncedCount = 0; // Reset se estado mudou
+                    }
+                    // CASO 3: Qualquer outro estado → reset contadores
+                    else {
+                        this._connectedSyncedCount = 0;
+                        this._pageErrorCount = 0;
                     }
                 } catch (e) {
-                    logger.warn(this.accountName, `🔬 [DIAG] Erro ao ler estado: ${e.message}`);
+                    logger.warn(this.accountName, `🔬 [DIAG] Erro: ${e.message}`);
+                } finally {
+                    this._diagRunning = false;
                 }
             };
-            // Primeira verificação rápida em 3s, depois a cada 5s
-            setTimeout(() => runDiagnostic(), 3000);
-            this._diagnosticInterval = setInterval(() => runDiagnostic(), 5000); // A cada 5 segundos
+            // Primeira verificação em 3s, depois a cada 5s
+            this._diagnosticTimeout = setTimeout(() => runDiagnostic(), 3000);
+            this._diagnosticInterval = setInterval(() => runDiagnostic(), 5000);
 
-            // AUTO-RECOVERY INTELIGENTE: 
-            // 1ª falha → preserva sessão PostgreSQL (tenta de novo sem QR)
-            // 2ª falha → limpa PostgreSQL (gera novo QR na próxima)
+            // FALLBACK RECOVERY: Se nada funcionou em 60s, força recovery
             if (this._injectRecoveryTimeout) clearTimeout(this._injectRecoveryTimeout);
             if (!this._injectFailCount) this._injectFailCount = 0;
             this._injectRecoveryTimeout = setTimeout(async () => {
@@ -689,32 +728,28 @@ class WhatsAppSession extends EventEmitter {
                     const db = require('../database/DatabaseManager');
 
                     if (this._injectFailCount >= 2) {
-                        // 2ª+ falha: sessão provavelmente corrompida — limpa PostgreSQL
-                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x seguidas. Sessão corrompida — limpando PostgreSQL...`);
+                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x. Limpando sessão PostgreSQL...`);
                         try {
-                            await this.destroy(true); // clearAuth=true
-                            const sessionId = `RemoteAuth-account-${this.accountId}`;
-                            await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [sessionId]);
-                            logger.warn(this.accountName, `🗑️ Sessão limpa. Próximo start gerará novo QR code.`);
+                            await this.destroy(true);
+                            await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [`RemoteAuth-account-${this.accountId}`]);
+                            logger.warn(this.accountName, `🗑️ Sessão limpa. Próximo start = novo QR code.`);
                             await db.updateAccountStatus(this.accountId, 'disconnected');
-                            this._injectFailCount = 0; // Reset para próximo ciclo
-                        } catch (err) {
-                            logger.error(this.accountName, `Erro no auto-recovery: ${err.message}`);
-                        }
+                            this._injectFailCount = 0;
+                        } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
                     } else {
-                        // 1ª falha: tenta preservar — pode ser problema temporário
-                        logger.warn(this.accountName, `⚠️ Inject preso por 3 min (tentativa ${this._injectFailCount}/2). Preservando sessão...`);
+                        logger.warn(this.accountName, `⚠️ Inject preso por 60s (tentativa ${this._injectFailCount}/2). Preservando sessão...`);
                         try {
-                            await this.destroy(false); // clearAuth=false, preserva sessão
+                            await this.destroy(false);
                             await db.updateAccountStatus(this.accountId, 'disconnected');
-                            logger.info(this.accountName, `💡 Sessão preservada. Tente iniciar novamente (sem QR). Se falhar de novo, limpa automaticamente.`);
-                        } catch (err) {
-                            logger.error(this.accountName, `Erro no auto-recovery: ${err.message}`);
-                        }
+                            logger.info(this.accountName, `💡 Sessão preservada. Reconectando...`);
+                            if (!this.intentionalStop) {
+                                setTimeout(() => this.reconnect(), 5000);
+                            }
+                        } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
                     }
                     this.emit('inject_timeout');
                 }
-            }, 90000); // 90 segundos (era 3 min)
+            }, 60000); // 60 segundos
         });
 
         // Pronto
@@ -1366,6 +1401,11 @@ class WhatsAppSession extends EventEmitter {
             this.stopPresenceLoop();
             this.stopStandbyLoop();
             this.stopContactSyncLoop();
+
+            // Limpa diagnósticos e recovery pendentes
+            if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
+            if (this._diagnosticTimeout) { clearTimeout(this._diagnosticTimeout); this._diagnosticTimeout = null; }
+            if (this._injectRecoveryTimeout) { clearTimeout(this._injectRecoveryTimeout); this._injectRecoveryTimeout = null; }
 
             if (this.client) {
                 logger.info(this.accountName, `Destruindo sessão... (clearAuth: ${clearAuth})`);
