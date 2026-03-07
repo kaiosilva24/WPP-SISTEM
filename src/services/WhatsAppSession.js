@@ -1393,8 +1393,8 @@ class WhatsAppSession extends EventEmitter {
     }
 
     /**
-     * Destrói a sessão (preserva token de autenticação salvo em disco para reconexão futura)
-     * @param {boolean} clearAuth - Se true, faz logout e apaga o token (usar apenas ao deletar conta)
+     * Destrói a sessão com timeouts em TODAS as operações
+     * @param {boolean} clearAuth - Se true, faz logout e apaga o token
      */
     async destroy(clearAuth = false) {
         try {
@@ -1410,38 +1410,56 @@ class WhatsAppSession extends EventEmitter {
             if (this.client) {
                 logger.info(this.accountName, `Destruindo sessão... (clearAuth: ${clearAuth})`);
 
-                // Apaga o token APENAS se solicitado explicitamente (ex: deletar conta)
+                // Salva referência ao browser ANTES de qualquer operação
+                const browser = this.client.pupBrowser;
+                const browserPid = browser?.process?.()?.pid;
+
+                // Logout com timeout de 10s (pode travar se página morta)
                 if (clearAuth) {
                     try {
-                        await this.client.logout();
+                        await Promise.race([
+                            this.client.logout(),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('logout timeout')), 10000))
+                        ]);
                         logger.info(this.accountName, 'Logout realizado — token apagado.');
                     } catch (e) {
-                        logger.warn(this.accountName, 'Erro ao fazer logout (ignorado)');
+                        logger.warn(this.accountName, `Logout falhou/timeout (${e.message}) — prosseguindo...`);
                     }
                 } else {
                     logger.info(this.accountName, 'Sem logout — token preservado para reconexão futura.');
                 }
 
-                // Destrói o cliente (fecha o navegador)
+                // Destroy do cliente com timeout de 10s
                 try {
-                    await this.client.destroy();
+                    await Promise.race([
+                        this.client.destroy(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('destroy timeout')), 10000))
+                    ]);
                 } catch (e) {
-                    logger.warn(this.accountName, 'Erro ao destruir cliente (ignorado)');
+                    logger.warn(this.accountName, `Destroy falhou/timeout (${e.message})`);
                 }
 
-                // Tenta fechar o navegador via puppeteer
+                // Fecha browser com timeout de 5s
                 try {
-                    if (this.client.pupBrowser) {
-                        await this.client.pupBrowser.close();
+                    if (browser) {
+                        await Promise.race([
+                            browser.close(),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('browser close timeout')), 5000))
+                        ]);
                     }
                 } catch (e) {
-                    logger.warn(this.accountName, 'Erro ao fechar navegador (ignorado)');
+                    logger.warn(this.accountName, `Browser close falhou (${e.message})`);
+                    // FORCE KILL: Se nada funcionou, mata o processo do Chrome
+                    if (browserPid) {
+                        try {
+                            process.kill(browserPid, 'SIGKILL');
+                            logger.warn(this.accountName, `🔪 Browser force-killed (PID: ${browserPid})`);
+                        } catch (killErr) { /* processo já morreu */ }
+                    }
                 }
 
                 this.client = null;
             }
-
-            this.stopStandbyLoop();
 
             // Cleanup do proxy-chain
             if (this.anonymizedProxyUrl) {
