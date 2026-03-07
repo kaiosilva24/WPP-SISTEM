@@ -846,11 +846,15 @@ class WhatsAppSession extends EventEmitter {
     }
 
     /**
-     * Motor de Presence Keep-Alive (Mantém 100% online)
+     * Motor de Presence Keep-Alive + HEALTH CHECKER (Detecta morte silenciosa)
+     * A cada 10s tenta sendPresenceAvailable(). Se falhar 6x seguidas (60s),
+     * verifica estado real da conexão e força reconexão se necessário.
      */
     startPresenceLoop() {
         this.stopPresenceLoop();
         logger.info(this.accountName, '🟢 Keep-Alive de Presença (Online) iniciado.');
+        this._presenceFailCount = 0;
+        this._lastHealthCheck = Date.now();
 
         // Força IMEDIATAMENTE antes de aguardar o loop
         if (this.client && this.status === 'ready' && !this.isPaused) {
@@ -858,8 +862,92 @@ class WhatsAppSession extends EventEmitter {
         }
 
         this.presenceInterval = setInterval(async () => {
-            if (this.status === 'ready' && !this.isPaused && this.client) {
-                try { await this.client.sendPresenceAvailable(); } catch (e) { }
+            if (this.status !== 'ready' || this.isPaused || !this.client) return;
+
+            try {
+                await this.client.sendPresenceAvailable();
+                this._presenceFailCount = 0; // Reset - conexão OK
+            } catch (e) {
+                this._presenceFailCount++;
+
+                if (this._presenceFailCount >= 6) { // 60 segundos de falhas consecutivas
+                    logger.warn(this.accountName, `⚠️ [HEALTH] sendPresenceAvailable falhou ${this._presenceFailCount}x seguidas. Verificando conexão...`);
+
+                    // Verifica estado real da conexão via page evaluate
+                    try {
+                        const state = await this.client.pupPage.evaluate(() => {
+                            try { return window.AuthStore?.AppState?.state || 'UNKNOWN'; } catch (e) { return 'PAGE_ERROR'; }
+                        }).catch(() => 'PAGE_CRASH');
+
+                        if (state !== 'CONNECTED') {
+                            logger.error(this.accountName, `💀 [HEALTH] Conexão MORTA! AppState=${state}. Forçando reconexão...`);
+                            this._presenceFailCount = 0;
+                            this.stopPresenceLoop();
+                            this.stopStandbyLoop();
+                            this.stopContactSyncLoop();
+                            this.status = 'disconnected';
+                            this.emit('disconnected', 'silent_death');
+                            if (!this.intentionalStop) {
+                                setTimeout(() => this.reconnect(), 5000);
+                            }
+                            return;
+                        } else {
+                            // Conexão ok mas presença falhou — pode ser transitório
+                            logger.info(this.accountName, `🔍 [HEALTH] AppState=CONNECTED mas presença falhou. Monitorando...`);
+                            this._presenceFailCount = 3; // Reduz contador mas mantém alerta
+                        }
+                    } catch (evalErr) {
+                        logger.error(this.accountName, `💀 [HEALTH] Página do Chrome não responde! Forçando reconexão...`);
+                        this._presenceFailCount = 0;
+                        this.stopPresenceLoop();
+                        this.stopStandbyLoop();
+                        this.stopContactSyncLoop();
+                        this.status = 'disconnected';
+                        this.emit('disconnected', 'page_unresponsive');
+                        if (!this.intentionalStop) {
+                            setTimeout(() => this.reconnect(), 5000);
+                        }
+                        return;
+                    }
+                }
+            }
+
+            // DEEP HEALTH CHECK a cada 5 minutos — verifica se a página responde
+            const now = Date.now();
+            if (now - this._lastHealthCheck >= 300000) { // 5 min
+                this._lastHealthCheck = now;
+                try {
+                    const healthResult = await Promise.race([
+                        this.client.pupPage.evaluate(() => {
+                            return {
+                                appState: window.AuthStore?.AppState?.state || 'N/A',
+                                hasSynced: window.AuthStore?.AppState?.hasSynced,
+                                online: navigator.onLine,
+                                wwebjsReady: !!(window.WWebJS && window.WWebJS.sendMessage)
+                            };
+                        }),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000))
+                    ]);
+
+                    if (healthResult.appState !== 'CONNECTED' || !healthResult.wwebjsReady) {
+                        logger.warn(this.accountName, `⚠️ [DEEP-HEALTH] AppState=${healthResult.appState} | WWebJS=${healthResult.wwebjsReady} | Online=${healthResult.online}`);
+
+                        if (healthResult.appState !== 'CONNECTED') {
+                            logger.error(this.accountName, `💀 [DEEP-HEALTH] Conexão perdida silenciosamente! Reconectando...`);
+                            this.stopPresenceLoop();
+                            this.stopStandbyLoop();
+                            this.stopContactSyncLoop();
+                            this.status = 'disconnected';
+                            this.emit('disconnected', 'deep_health_failed');
+                            if (!this.intentionalStop) {
+                                setTimeout(() => this.reconnect(), 5000);
+                            }
+                            return;
+                        }
+                    }
+                } catch (healthErr) {
+                    logger.warn(this.accountName, `⚠️ [DEEP-HEALTH] Verificação falhou: ${healthErr.message}`);
+                }
             }
         }, 10000);
     }
