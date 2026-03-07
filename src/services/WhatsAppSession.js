@@ -726,6 +726,7 @@ class WhatsAppSession extends EventEmitter {
 
             this.status = 'ready';
             this._injectFailCount = 0; // Reset contador — sessão funcionou!
+            this._reconnectAttempts = 0; // Reset reconexões — tudo ok!
             this.qrCode = null;
             this.qrTimestamp = null; // Limpa o timestamp
             this.stats.startTime = Date.now();
@@ -798,14 +799,34 @@ class WhatsAppSession extends EventEmitter {
     }
 
     /**
-     * Tenta reconectar
+     * Tenta reconectar com limite de tentativas e backoff exponencial
+     * Máx 3 tentativas. Delay: 30s → 60s → 120s
      */
     async reconnect() {
-        // Force restart even if ready, because user explicitly requested it via button
-        // if (this.status === 'ready') return; 
+        // Guard contra chamadas concorrentes
+        if (this._reconnecting) {
+            logger.info(this.accountName, 'Reconexão já em andamento, ignorando chamada duplicada.');
+            return;
+        }
 
+        // Limite de tentativas
+        if (!this._reconnectAttempts) this._reconnectAttempts = 0;
+        this._reconnectAttempts++;
+
+        if (this._reconnectAttempts > 3) {
+            logger.error(this.accountName, `❌ Máximo de 3 tentativas de reconexão atingido. Parando.`);
+            this.status = 'disconnected';
+            this._reconnectAttempts = 0;
+            this.emit('disconnected', 'max_reconnect_attempts');
+            return;
+        }
+
+        const delay = Math.min(30000 * Math.pow(2, this._reconnectAttempts - 1), 120000);
+
+        this._reconnecting = true;
         try {
             logger.reconnecting(this.accountName);
+            logger.info(this.accountName, `Tentativa ${this._reconnectAttempts}/3...`);
 
             // Destrói cliente anterior se existir para liberar recursos e locks
             if (this.client) {
@@ -819,11 +840,21 @@ class WhatsAppSession extends EventEmitter {
             }
 
             await this.initialize();
+            this._reconnectAttempts = 0; // Reset no sucesso
         } catch (error) {
-            logger.error(this.accountName, `Erro ao reconectar: ${error.message}`);
+            logger.error(this.accountName, `Erro ao reconectar (${this._reconnectAttempts}/3): ${error.message}`);
 
-            // Tenta novamente após 30 segundos
-            setTimeout(() => this.reconnect(), 30000);
+            if (this._reconnectAttempts < 3) {
+                logger.info(this.accountName, `Próxima tentativa em ${delay / 1000}s...`);
+                setTimeout(() => this.reconnect(), delay);
+            } else {
+                logger.error(this.accountName, `❌ 3 tentativas falharam. Conta marcada como desconectada.`);
+                this.status = 'disconnected';
+                this._reconnectAttempts = 0;
+                this.emit('disconnected', 'reconnect_failed');
+            }
+        } finally {
+            this._reconnecting = false;
         }
     }
 

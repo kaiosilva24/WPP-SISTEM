@@ -78,10 +78,13 @@ async function main() {
             logger.info(null, `Encontradas ${existingAccounts.length} contas no banco de dados.`);
 
             // SEGURANÇA: No deploy/restart, TODAS as contas começam como DESCONECTADAS.
-            // O Scheduler ativará as contas agendadas (schedule_enabled=ON) no horário correto.
-            // Contas sem agendamento devem ser iniciadas manualmente pelo usuário.
+            // Mas ANTES de resetar, salva quais estavam ativas para auto-reconectar depois.
             let resetCount = 0;
+            const previouslyActiveIds = new Set();
             for (const account of existingAccounts) {
+                if (account.status === 'ready' || account.status === 'connected' || account.status === 'initializing') {
+                    previouslyActiveIds.add(account.id);
+                }
                 if (account.status !== 'disconnected') {
                     await db.updateAccountStatus(account.id, 'disconnected');
                     resetCount++;
@@ -89,6 +92,9 @@ async function main() {
             }
             if (resetCount > 0) {
                 logger.info(null, `🔄 ${resetCount} conta(s) foram resetadas para DESCONECTADO após restart.`);
+                if (previouslyActiveIds.size > 0) {
+                    logger.info(null, `📋 Contas que estavam ativas antes do restart: ${[...previouslyActiveIds].join(', ')}`);
+                }
             }
             logger.info(null, '🔌 Todas as contas estão DESCONECTADAS. O Scheduler ativará as contas agendadas (ON) automaticamente.');
         } else {
@@ -98,44 +104,47 @@ async function main() {
         // Inicia o loop de rotatividade de contas (Agendamento & Procuração Proxy) AGORA QUE O BANCO ESTÁ OFF
         schedulerManager.start();
 
-        // AUTO-RECONEXÃO: Reconecta contas que têm sessão salva no PostgreSQL
-        // Isso garante que contas iniciadas manualmente sobrevivam restarts/deploys
-        (async () => {
-            try {
-                const allAccounts = await db.getAllAccounts();
-                const sessionsResult = await db.pool.query('SELECT session_id FROM wwebjs_sessions');
-                const savedSessions = new Set(sessionsResult.rows.map(r => r.session_id));
+        // AUTO-RECONEXÃO: Reconecta APENAS contas que estavam ATIVAS antes do restart
+        // E que têm sessão salva no PostgreSQL (para reconectar sem QR)
+        if (typeof previouslyActiveIds !== 'undefined' && previouslyActiveIds.size > 0) {
+            (async () => {
+                try {
+                    const allAccounts = await db.getAllAccounts();
+                    const sessionsResult = await db.pool.query('SELECT session_id FROM wwebjs_sessions');
+                    const savedSessions = new Set(sessionsResult.rows.map(r => r.session_id));
 
-                const accountsToReconnect = allAccounts.filter(acc => {
-                    const sessionId = `RemoteAuth-account-${acc.id}`;
-                    return savedSessions.has(sessionId);
-                });
+                    const accountsToReconnect = allAccounts.filter(acc => {
+                        const sessionId = `RemoteAuth-account-${acc.id}`;
+                        // Só reconecta se: 1) estava ativa antes E 2) tem sessão salva
+                        return previouslyActiveIds.has(acc.id) && savedSessions.has(sessionId);
+                    });
 
-                if (accountsToReconnect.length > 0) {
-                    logger.info(null, `🔄 ${accountsToReconnect.length} conta(s) com sessão salva detectadas. Auto-reconectando em sequência...`);
+                    if (accountsToReconnect.length > 0) {
+                        logger.info(null, `🔄 ${accountsToReconnect.length} conta(s) ativa(s) com sessão salva. Auto-reconectando...`);
 
-                    for (let i = 0; i < accountsToReconnect.length; i++) {
-                        const acc = accountsToReconnect[i];
-                        // Delay escalonado entre contas (10s cada) para não sobrecarregar
-                        if (i > 0) {
-                            await new Promise(resolve => setTimeout(resolve, 10000));
+                        for (let i = 0; i < accountsToReconnect.length; i++) {
+                            const acc = accountsToReconnect[i];
+                            // Delay escalonado entre contas (15s cada) para não sobrecarregar
+                            if (i > 0) {
+                                await new Promise(resolve => setTimeout(resolve, 15000));
+                            }
+                            try {
+                                logger.info(null, `🔄 [${i + 1}/${accountsToReconnect.length}] Auto-reconectando ${acc.name} (conta ${acc.id})...`);
+                                await schedulerManager.activateAccount(acc);
+                                logger.info(null, `✅ [${i + 1}/${accountsToReconnect.length}] ${acc.name} — reconexão solicitada.`);
+                            } catch (err) {
+                                logger.error(null, `❌ Erro ao auto-reconectar ${acc.name}: ${err.message}`);
+                            }
                         }
-                        try {
-                            logger.info(null, `🔄 [${i + 1}/${accountsToReconnect.length}] Auto-reconectando ${acc.name} (conta ${acc.id})...`);
-                            await schedulerManager.activateAccount(acc);
-                            logger.info(null, `✅ [${i + 1}/${accountsToReconnect.length}] ${acc.name} — reconexão solicitada.`);
-                        } catch (err) {
-                            logger.error(null, `❌ Erro ao auto-reconectar ${acc.name}: ${err.message}`);
-                        }
+                        logger.info(null, `🔄 Auto-reconexão finalizada.`);
+                    } else {
+                        logger.info(null, '📭 Contas ativas anteriores não tinham sessão salva para auto-reconectar.');
                     }
-                    logger.info(null, `🔄 Auto-reconexão finalizada.`);
-                } else {
-                    logger.info(null, '📭 Nenhuma conta com sessão salva para auto-reconectar.');
+                } catch (err) {
+                    logger.error(null, `❌ Erro na auto-reconexão: ${err.message}`);
                 }
-            } catch (err) {
-                logger.error(null, `❌ Erro na auto-reconexão: ${err.message}`);
-            }
-        })();
+            })();
+        }
 
         logger.success(null, 'Backend API iniciado com sucesso!');
         logger.info(null, `🔗 API rodando em: http://localhost:${port}`);
