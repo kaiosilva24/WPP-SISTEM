@@ -620,11 +620,12 @@ class WhatsAppSession extends EventEmitter {
             logger.authenticated(this.accountName);
             this.emit('authenticated');
 
-            // DIAGNÓSTICO + AUTO-FIX: Monitora estado interno do WhatsApp Web a cada 15s
-            // Se detectar CONNECTED+hasSynced=true mas inject não completou, tenta re-inject!
+            // DIAGNÓSTICO + AUTO-FIX: Monitora estado interno do WhatsApp Web a cada 5s
+            // Se detectar CONNECTED+hasSynced=true mas inject não completou, tenta re-inject IMEDIATAMENTE!
             if (this._diagnosticInterval) clearInterval(this._diagnosticInterval);
-            this._connectedSyncedCount = 0; // Conta quantas vezes viu CONNECTED+hasSynced
-            this._diagnosticInterval = setInterval(async () => {
+            this._connectedSyncedCount = 0;
+
+            const runDiagnostic = async () => {
                 if (this.status !== 'authenticated' || !this.client?.pupPage) {
                     clearInterval(this._diagnosticInterval);
                     this._diagnosticInterval = null;
@@ -652,17 +653,18 @@ class WhatsAppSession extends EventEmitter {
                     // Isso acontece quando a página navega durante o inject
                     if (diag.appState === 'CONNECTED' && diag.hasSynced === true && !diag.wwebjsReady) {
                         this._connectedSyncedCount++;
-                        if (this._connectedSyncedCount >= 2) { // 30 segundos nesse estado
-                            logger.warn(this.accountName, `🔄 [AUTO-FIX] WhatsApp CONECTADO mas WWebJS não injetado. Tentando re-inject...`);
-                            this._connectedSyncedCount = 0; // Reset para evitar loops
-                            try {
-                                await this.client.inject();
-                                logger.info(this.accountName, `✅ [AUTO-FIX] Re-inject completou! Evento 'ready' deve disparar agora.`);
-                            } catch (injectErr) {
-                                logger.warn(this.accountName, `⚠️ [AUTO-FIX] Re-inject falhou: ${injectErr.message}. Aguardando auto-recovery...`);
+                        // Re-inject IMEDIATO na 1ª detecção — não espera confirmação
+                        logger.warn(this.accountName, `🔄 [AUTO-FIX] WhatsApp CONECTADO mas WWebJS não injetado (${this._connectedSyncedCount}x). Re-injetando...`);
+                        try {
+                            await this.client.inject();
+                            logger.info(this.accountName, `✅ [AUTO-FIX] Re-inject completou! Evento 'ready' deve disparar agora.`);
+                            this._connectedSyncedCount = 0;
+                        } catch (injectErr) {
+                            logger.warn(this.accountName, `⚠️ [AUTO-FIX] Re-inject falhou (${this._connectedSyncedCount}x): ${injectErr.message}`);
+                            if (this._connectedSyncedCount >= 3) {
+                                logger.error(this.accountName, `❌ [AUTO-FIX] 3 re-injects falharam. Aguardando recovery timeout...`);
+                                this._connectedSyncedCount = 0;
                             }
-                        } else {
-                            logger.info(this.accountName, `🔍 [DIAG] CONNECTED+hasSynced=true mas WWebJS ausente (${this._connectedSyncedCount}/2). Aguardando confirmação...`);
                         }
                     } else {
                         this._connectedSyncedCount = 0; // Reset se estado mudou
@@ -670,7 +672,10 @@ class WhatsAppSession extends EventEmitter {
                 } catch (e) {
                     logger.warn(this.accountName, `🔬 [DIAG] Erro ao ler estado: ${e.message}`);
                 }
-            }, 15000); // A cada 15 segundos
+            };
+            // Primeira verificação rápida em 3s, depois a cada 5s
+            setTimeout(() => runDiagnostic(), 3000);
+            this._diagnosticInterval = setInterval(() => runDiagnostic(), 5000); // A cada 5 segundos
 
             // AUTO-RECOVERY INTELIGENTE: 
             // 1ª falha → preserva sessão PostgreSQL (tenta de novo sem QR)
@@ -709,7 +714,7 @@ class WhatsAppSession extends EventEmitter {
                     }
                     this.emit('inject_timeout');
                 }
-            }, 180000); // 3 minutos
+            }, 90000); // 90 segundos (era 3 min)
         });
 
         // Pronto
