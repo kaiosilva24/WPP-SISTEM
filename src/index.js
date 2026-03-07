@@ -98,6 +98,45 @@ async function main() {
         // Inicia o loop de rotatividade de contas (Agendamento & Procuração Proxy) AGORA QUE O BANCO ESTÁ OFF
         schedulerManager.start();
 
+        // AUTO-RECONEXÃO: Reconecta contas que têm sessão salva no PostgreSQL
+        // Isso garante que contas iniciadas manualmente sobrevivam restarts/deploys
+        (async () => {
+            try {
+                const allAccounts = await db.getAllAccounts();
+                const sessionsResult = await db.pool.query('SELECT session_id FROM wwebjs_sessions');
+                const savedSessions = new Set(sessionsResult.rows.map(r => r.session_id));
+
+                const accountsToReconnect = allAccounts.filter(acc => {
+                    const sessionId = `RemoteAuth-account-${acc.id}`;
+                    return savedSessions.has(sessionId);
+                });
+
+                if (accountsToReconnect.length > 0) {
+                    logger.info(null, `🔄 ${accountsToReconnect.length} conta(s) com sessão salva detectadas. Auto-reconectando em sequência...`);
+
+                    for (let i = 0; i < accountsToReconnect.length; i++) {
+                        const acc = accountsToReconnect[i];
+                        // Delay escalonado entre contas (10s cada) para não sobrecarregar
+                        if (i > 0) {
+                            await new Promise(resolve => setTimeout(resolve, 10000));
+                        }
+                        try {
+                            logger.info(null, `🔄 [${i + 1}/${accountsToReconnect.length}] Auto-reconectando ${acc.name} (conta ${acc.id})...`);
+                            await schedulerManager.activateAccount(acc);
+                            logger.info(null, `✅ [${i + 1}/${accountsToReconnect.length}] ${acc.name} — reconexão solicitada.`);
+                        } catch (err) {
+                            logger.error(null, `❌ Erro ao auto-reconectar ${acc.name}: ${err.message}`);
+                        }
+                    }
+                    logger.info(null, `🔄 Auto-reconexão finalizada.`);
+                } else {
+                    logger.info(null, '📭 Nenhuma conta com sessão salva para auto-reconectar.');
+                }
+            } catch (err) {
+                logger.error(null, `❌ Erro na auto-reconexão: ${err.message}`);
+            }
+        })();
+
         logger.success(null, 'Backend API iniciado com sucesso!');
         logger.info(null, `🔗 API rodando em: http://localhost:${port}`);
         logger.info(null, `🌐 Frontend deve rodar em: http://localhost:5173`);
