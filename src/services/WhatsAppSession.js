@@ -636,25 +636,25 @@ class WhatsAppSession extends EventEmitter {
                 }
                 this._diagRunning = true;
                 try {
-                    const diag = await this.client.pupPage.evaluate(() => {
-                        const result = {};
-                        try { result.appState = window.AuthStore?.AppState?.state || 'N/A'; } catch (e) { result.appState = 'ERRO'; }
-                        try { result.version = window.Debug?.VERSION || 'N/A'; } catch (e) { result.version = 'ERRO'; }
-                        try { result.hasSynced = window.AuthStore?.AppState?.hasSynced; } catch (e) { result.hasSynced = 'ERRO'; }
-                        try { result.socketState = window.AuthStore?.Socket?.state || 'N/A'; } catch (e) { result.socketState = 'N/A'; }
-                        try { result.isOnline = navigator.onLine; } catch (e) { result.isOnline = 'N/A'; }
-                        try { result.connRef = !!window.AuthStore?.Conn?.ref; } catch (e) { result.connRef = 'N/A'; }
-                        try { result.wwebjsReady = !!(window.WWebJS && window.WWebJS.sendMessage); } catch (e) { result.wwebjsReady = false; }
-                        return result;
-                    }).catch(() => ({ appState: 'PAGE_ERROR', version: '?', hasSynced: '?', socketState: '?', isOnline: '?', wwebjsReady: false }));
+                    const diag = await Promise.race([
+                        this.client.pupPage.evaluate(() => {
+                            const result = {};
+                            try { result.appState = window.AuthStore?.AppState?.state || 'N/A'; } catch (e) { result.appState = 'ERRO'; }
+                            try { result.hasSynced = window.AuthStore?.AppState?.hasSynced; } catch (e) { result.hasSynced = 'ERRO'; }
+                            try { result.wwebjsReady = !!(window.WWebJS && window.WWebJS.sendMessage); } catch (e) { result.wwebjsReady = false; }
+                            return result;
+                        }).catch(() => ({ appState: 'PAGE_ERROR', hasSynced: '?', wwebjsReady: false })),
+                        new Promise(resolve => setTimeout(() => resolve({ appState: 'EVAL_TIMEOUT', hasSynced: '?', wwebjsReady: false }), 4000))
+                    ]);
 
                     logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | hasSynced=${diag.hasSynced} | WWebJS=${diag.wwebjsReady}`);
 
-                    // CASO 1: PAGE_ERROR — página crashou/navegou → recovery imediato
-                    if (diag.appState === 'PAGE_ERROR' || diag.appState === 'ERRO') {
+                    // CASO 1: PAGE_ERROR/EVAL_TIMEOUT — página crashou ou inject bloqueando
+                    if (diag.appState === 'PAGE_ERROR' || diag.appState === 'ERRO' || diag.appState === 'EVAL_TIMEOUT') {
                         this._pageErrorCount++;
                         if (this._pageErrorCount >= 2) { // 10s confirmação
-                            logger.error(this.accountName, `💀 [DIAG] Página CRASHOU (${this._pageErrorCount}x). Recovery imediato!`);
+                            const reason = diag.appState === 'EVAL_TIMEOUT' ? 'Inject travado (evaluate timeout)' : 'Página crashou';
+                            logger.error(this.accountName, `💀 [DIAG] ${reason} (${this._pageErrorCount}x). Recovery imediato!`);
                             clearInterval(this._diagnosticInterval); this._diagnosticInterval = null;
                             if (this._injectRecoveryTimeout) { clearTimeout(this._injectRecoveryTimeout); this._injectRecoveryTimeout = null; }
                             this._pageErrorCount = 0;
