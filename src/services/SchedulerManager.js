@@ -140,15 +140,34 @@ class SchedulerManager {
             }
         }
 
-        // Tenta acionar Webhook se configurado — mas SÓ se a sessão NÃO está já conectada
-        // E (NOVO): SÓ se a conta tiver um Proxy IP configurado. Sem proxy = sem webhook.
         const isSessionAlreadyReady = session && (session.status === 'ready' || session.status === 'authenticated') && !session.isPaused;
-        if (webhook_id && !isSessionAlreadyReady) {
+
+        let targetWebhookId = webhook_id;
+
+        // Se a conta não tem webhook_id explícito, mas TEM proxy, tentamos "copiar" o webhook de outra conta 
+        // que use esse exato mesmo proxy. Assim o usuário não precisa configurar o webhook 1 por 1 se esquecer.
+        if (!targetWebhookId && account.proxy_ip) {
+            const allAccounts = await db.getAllAccounts();
+            const peerAccount = allAccounts.find(a =>
+                a.proxy_ip === account.proxy_ip &&
+                String(a.proxy_port) === String(account.proxy_port) &&
+                a.webhook_id
+            );
+
+            if (peerAccount) {
+                targetWebhookId = peerAccount.webhook_id;
+                logger.info('Scheduler', `[${name}] Conta sem Webhook vinculado diretamente. Herdando Webhook da conta "${peerAccount.name}" (pois dividem o Proxy ${account.proxy_ip}:${account.proxy_port}).`);
+            }
+        }
+
+        if (targetWebhookId && !isSessionAlreadyReady) {
             if (account.proxy_ip) {
-                await this.triggerWebhook(webhook_id, name);
+                await this.triggerWebhook(targetWebhookId, name);
             } else {
                 logger.info('Scheduler', `[${name}] Webhook ignorado (Conta NÃO possui Proxy configurado). Iniciando direto...`);
             }
+        } else if (!targetWebhookId && account.proxy_ip && !isSessionAlreadyReady) {
+            logger.warn('Scheduler', `[${name}] ALERTA: Conta possui Proxy, mas NENHUM webhook de rotação foi encontrado no sistema para este proxy.`);
         }
 
         try {
