@@ -174,7 +174,17 @@ class SchedulerManager {
             if (session) {
                 if (session.status === 'disconnected' || session.status === 'destroyed' || session.status === 'error') {
                     // Sessão existe mas o client/browser morreu. Precisa reinicializar do zero.
-                    logger.info('Scheduler', `[${name}] Sessão parada (status: ${session.status}), reinicializando...`);
+                    logger.info('Scheduler', `[${name}] Inicializando sessão...`);
+                    try {
+                        // Emite evento global de inicialização para travar o botão Iniciar nas UIs web
+                        const { getIO } = require('../web/socket');
+                        const io = getIO();
+                        if (io) {
+                            io.emit('account:initializing', { accountId: account.id });
+                        }
+                    } catch (e) {
+                        logger.error('Scheduler', `[${name}] Erro ao emitir evento account:initializing: ${e.message}`);
+                    }
                     session.initialize();
                 } else if (session.isPaused || session.status === 'paused') {
                     // Sessão está viva, apenas com o proxy/rede pausado
@@ -186,6 +196,16 @@ class SchedulerManager {
                 }
             } else {
                 // Não tem instancia ainda, cria uma nova
+                try {
+                    // Emite evento global de inicialização para travar o botão Iniciar nas UIs web
+                    const { getIO } = require('../web/socket');
+                    const io = getIO();
+                    if (io) {
+                        io.emit('account:initializing', { accountId: account.id });
+                    }
+                } catch (e) {
+                    logger.error('Scheduler', `[${name}] Erro ao emitir evento account:initializing: ${e.message}`);
+                }
                 await sessionManager.createSession(id, name, { visible: false });
                 logger.info('Scheduler', `[${name}] Nova sessão criada.`);
             }

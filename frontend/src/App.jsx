@@ -264,6 +264,12 @@ function App() {
             loadAccounts();
         });
 
+        socket.on('account:initializing', ({ accountId }) => {
+            setAccounts(prev => prev.map(acc =>
+                acc.id === accountId ? { ...acc, status: 'initializing' } : acc
+            ));
+        });
+
         socket.on('session:disconnected', ({ accountName }) => {
             console.log('⚠️ Desconectada:', accountName);
             showToast(`${accountName} desconectada`, 'warning');
@@ -496,6 +502,9 @@ function App() {
 
     const stopAccount = async (id) => {
         try {
+            // Optimistic update
+            setAccounts(accounts.map(acc => acc.id === id ? { ...acc, status: 'disconnected' } : acc));
+
             await fetch(`/api/accounts/${id}/stop`, { method: 'POST' });
             showToast('Sessão destruída e encerrada!', 'success');
             loadAccounts();
