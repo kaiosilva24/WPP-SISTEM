@@ -141,10 +141,14 @@ class SchedulerManager {
         }
 
         // Tenta acionar Webhook se configurado — mas SÓ se a sessão NÃO está já conectada
-        // (evita disparar webhook repetidamente quando a conta já está online)
+        // E (NOVO): SÓ se a conta tiver um Proxy IP configurado. Sem proxy = sem webhook.
         const isSessionAlreadyReady = session && (session.status === 'ready' || session.status === 'authenticated') && !session.isPaused;
         if (webhook_id && !isSessionAlreadyReady) {
-            await this.triggerWebhook(webhook_id, name);
+            if (account.proxy_ip) {
+                await this.triggerWebhook(webhook_id, name);
+            } else {
+                logger.info('Scheduler', `[${name}] Webhook ignorado (Conta NÃO possui Proxy configurado). Iniciando direto...`);
+            }
         }
 
         try {
