@@ -703,10 +703,24 @@ class WhatsAppSession extends EventEmitter {
                             }
                         }
                     }
-                    // CASO 3: Qualquer outro estado → reset contadores
+                    // CASO 4: WWebJS presente na página mas o Evento 'ready' nunca disparou no Node.js (Vítima de Navigation / Context Destroyed)
+                    else if (diag.appState === 'CONNECTED' && diag.hasSynced === true && diag.wwebjsReady === true) {
+                        this._readyWaitCount = (this._readyWaitCount || 0) + 1;
+                        if (this._readyWaitCount >= 4) { // 20 segundos travado esperando o ready
+                            logger.warn(this.accountName, `🚨 [AUTO-FIX] Contexto JS travou durante o Inject (Navigation). Recarregando a página para destrancar a lib...`);
+                            this._readyWaitCount = 0;
+                            try {
+                                await this.client.pupPage.reload({ waitUntil: 'domcontentloaded' });
+                            } catch (e) {
+                                logger.error(this.accountName, `Erro ao recarregar a página no FIX: ${e.message}`);
+                            }
+                        }
+                    }
+                    // CASO 5: Qualquer outro estado → reset contadores
                     else {
                         this._connectedSyncedCount = 0;
                         this._pageErrorCount = 0;
+                        this._readyWaitCount = 0;
                     }
                 } catch (e) {
                     logger.warn(this.accountName, `🔬 [DIAG] Erro: ${e.message}`);
