@@ -9,6 +9,7 @@ const sessionManager = require('../services/SessionManager');
 const messageHandler = require('../services/MessageHandler');
 const accountsRouter = require('../api/accounts');
 const webhooksRouter = require('../api/webhooks');
+const logsRouter = require('../api/logs');
 const { router: authRouter, seedDefaultAdmin } = require('../api/auth');
 
 /**
@@ -88,6 +89,9 @@ class WebServer {
 
         // Rotas dos webhooks e proxies
         this.app.use('/api/webhooks', webhooksRouter);
+
+        // Rota de logs do sistema
+        this.app.use('/api/logs', logsRouter);
 
         // Seed admin padrão ao iniciar rotas
         seedDefaultAdmin();

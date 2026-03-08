@@ -149,13 +149,17 @@ class SchedulerManager {
 
         try {
             if (session) {
-                if (session.isPaused || session.status === 'paused') {
-                    // Dispara evento resume nativo do sistema
+                if (session.status === 'disconnected' || session.status === 'destroyed' || session.status === 'error') {
+                    // Sessão existe mas o client/browser morreu. Precisa reinicializar do zero.
+                    logger.info('Scheduler', `[${name}] Sessão parada (status: ${session.status}), reinicializando...`);
+                    session.initialize();
+                } else if (session.isPaused || session.status === 'paused') {
+                    // Sessão está viva, apenas com o proxy/rede pausado
                     session.resume();
                     logger.info('Scheduler', `[${name}] Sessão retomada.`);
                 } else {
                     // Já parece rodando de alguma forma, re-conecta se preciso
-                    logger.info('Scheduler', `[${name}] Tentativa de iniciar sessão já existente ignorada.`);
+                    logger.info('Scheduler', `[${name}] Tentativa de iniciar sessão já existente ignorada (Status: ${session.status}).`);
                 }
             } else {
                 // Não tem instancia ainda, cria uma nova
