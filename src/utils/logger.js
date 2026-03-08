@@ -109,6 +109,7 @@ function log(level, sessionId, message, color = colors.reset) {
  */
 const logger = {
     setIO,
+    getIO: () => _io,
     setAccountId,
     error: (sessionId, message) => log('error', sessionId, message, colors.red),
     warn: (sessionId, message) => log('warn', sessionId, message, colors.yellow),

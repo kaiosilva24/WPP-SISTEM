@@ -177,8 +177,7 @@ class SchedulerManager {
                     logger.info('Scheduler', `[${name}] Inicializando sessão...`);
                     try {
                         // Emite evento global de inicialização para travar o botão Iniciar nas UIs web
-                        const { getIO } = require('../web/socket');
-                        const io = getIO();
+                        const io = logger.getIO ? logger.getIO() : null;
                         if (io) {
                             io.emit('account:initializing', { accountId: account.id });
                         }
@@ -198,8 +197,7 @@ class SchedulerManager {
                 // Não tem instancia ainda, cria uma nova
                 try {
                     // Emite evento global de inicialização para travar o botão Iniciar nas UIs web
-                    const { getIO } = require('../web/socket');
-                    const io = getIO();
+                    const io = logger.getIO ? logger.getIO() : null;
                     if (io) {
                         io.emit('account:initializing', { accountId: account.id });
                     }
