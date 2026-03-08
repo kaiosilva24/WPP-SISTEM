@@ -70,11 +70,19 @@ class SchedulerManager {
                 if (isTimeToRun && !isCurrentlyActive && account.status !== 'error') {
                     // Está na hora de rodar as mensagens (conta deve estar ativa) -> Chama Resume / Inicializa
                     logger.info('Scheduler', `[${name}] Dentro do horário agendado (${scheduled_start_time} - ${scheduled_end_time}). Ativando...`);
-                    await this.activateAccount(account);
+                    try {
+                        await this.activateAccount(account);
+                    } catch (e) {
+                        logger.error('Scheduler', `[${name}] Falha na ativação agendada: ${e.message}`);
+                    }
                 } else if (!isTimeToRun && isCurrentlyActive) {
                     // Fora do horário de rodar -> Pausa a Conta (Modo Avião On / Offline do WWebJS)
                     logger.info('Scheduler', `[${name}] Fora do horário agendado (${scheduled_start_time} - ${scheduled_end_time}). Pausando...`);
-                    await this.pauseAccount(account);
+                    try {
+                        await this.pauseAccount(account);
+                    } catch (e) {
+                        logger.error('Scheduler', `[${name}] Falha na pausa agendada: ${e.message}`);
+                    }
                 }
             }
         } catch (error) {
@@ -103,74 +111,74 @@ class SchedulerManager {
     async activateAccount(account) {
         const { id, name, proxy_group_id, webhook_id } = account;
 
-        // Se a conta já tiver sessão no SessionManager e não estiver destruída, usaremos session.resume().
-        // Caso contrário, sessionManager.createSession().
-        const session = sessionManager.getSession(id);
-
-        // Checa conflito de proxy: bloqueia APENAS quando outra conta usa o MESMO IP:Porta
-        // Contas com proxy_group_id igual mas IPs diferentes podem rodar simultaneamente
-        if (account.proxy_ip) {
-            const allAccounts = await db.getAllAccounts();
-
-            const pIp1 = (account.proxy_ip || '').trim();
-            const pPort1 = String(account.proxy_port || '').trim();
-
-            const conflictAccount = allAccounts.find(a => {
-                if (a.id === id) return false;
-
-                const pIp2 = (a.proxy_ip || '').trim();
-                const pPort2 = String(a.proxy_port || '').trim();
-
-                // Só bloqueia se o IP E Porta forem exatamente iguais
-                const hasSameIpPort = pIp1 && pIp2 && pIp1 === pIp2 && pPort1 === pPort2;
-
-                if (hasSameIpPort) {
-                    const sess = sessionManager.getSession(a.id);
-                    // Sessão ativa = qualquer estado exceto desconectada/pausada/erro
-                    if (sess && !sess.isPaused && sess.status !== 'disconnected' && sess.status !== 'error') {
-                        return true;
-                    }
-                }
-                return false;
-            });
-
-            if (conflictAccount) {
-                logger.error('Scheduler', `[${name}] INICIAÇÃO RECUSADA: O Proxy ${pIp1}:${pPort1} já está sendo utilizado pela conta "${conflictAccount.name}".`);
-                return; // ABORTA O START!
-            }
-        }
-
-        const isSessionAlreadyReady = session && (session.status === 'ready' || session.status === 'authenticated') && !session.isPaused;
-
-        let targetWebhookId = webhook_id;
-
-        // Se a conta não tem webhook_id explícito, mas TEM proxy, tentamos "copiar" o webhook de outra conta 
-        // que use esse exato mesmo proxy. Assim o usuário não precisa configurar o webhook 1 por 1 se esquecer.
-        if (!targetWebhookId && account.proxy_ip) {
-            const allAccounts = await db.getAllAccounts();
-            const peerAccount = allAccounts.find(a =>
-                a.proxy_ip === account.proxy_ip &&
-                String(a.proxy_port) === String(account.proxy_port) &&
-                a.webhook_id
-            );
-
-            if (peerAccount) {
-                targetWebhookId = peerAccount.webhook_id;
-                logger.info('Scheduler', `[${name}] Conta sem Webhook vinculado diretamente. Herdando Webhook da conta "${peerAccount.name}" (pois dividem o Proxy ${account.proxy_ip}:${account.proxy_port}).`);
-            }
-        }
-
-        if (targetWebhookId && !isSessionAlreadyReady) {
-            if (account.proxy_ip) {
-                await this.triggerWebhook(targetWebhookId, name);
-            } else {
-                logger.info('Scheduler', `[${name}] Webhook ignorado (Conta NÃO possui Proxy configurado). Iniciando direto...`);
-            }
-        } else if (!targetWebhookId && account.proxy_ip && !isSessionAlreadyReady) {
-            logger.warn('Scheduler', `[${name}] ALERTA: Conta possui Proxy, mas NENHUM webhook de rotação foi encontrado no sistema para este proxy.`);
-        }
-
         try {
+            // Se a conta já tiver sessão no SessionManager e não estiver destruída, usaremos session.resume().
+            // Caso contrário, sessionManager.createSession().
+            const session = sessionManager.getSession(id);
+
+            // Checa conflito de proxy: bloqueia APENAS quando outra conta usa o MESMO IP:Porta
+            // Contas com proxy_group_id igual mas IPs diferentes podem rodar simultaneamente
+            if (account.proxy_ip) {
+                const allAccounts = await db.getAllAccounts();
+
+                const pIp1 = (account.proxy_ip || '').trim();
+                const pPort1 = String(account.proxy_port || '').trim();
+
+                const conflictAccount = allAccounts.find(a => {
+                    if (a.id === id) return false;
+
+                    const pIp2 = (a.proxy_ip || '').trim();
+                    const pPort2 = String(a.proxy_port || '').trim();
+
+                    // Só bloqueia se o IP E Porta forem exatamente iguais
+                    const hasSameIpPort = pIp1 && pIp2 && pIp1 === pIp2 && pPort1 === pPort2;
+
+                    if (hasSameIpPort) {
+                        const sess = sessionManager.getSession(a.id);
+                        // Sessão ativa = qualquer estado exceto desconectada/pausada/erro/destroyed
+                        if (sess && !sess.isPaused && !['disconnected', 'error', 'destroyed'].includes(sess.status)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                if (conflictAccount) {
+                    logger.error('Scheduler', `[${name}] INICIAÇÃO RECUSADA: O Proxy ${pIp1}:${pPort1} já está sendo utilizado pela conta "${conflictAccount.name}".`);
+                    throw new Error(`Proxy bloqueado pela conta ${conflictAccount.name}`); // ABORTA O START
+                }
+            }
+
+            const isSessionAlreadyReady = session && (session.status === 'ready' || session.status === 'authenticated') && !session.isPaused;
+
+            let targetWebhookId = webhook_id;
+
+            // Se a conta não tem webhook_id explícito, mas TEM proxy, tentamos "copiar" o webhook de outra conta 
+            // que use esse exato mesmo proxy. Assim o usuário não precisa configurar o webhook 1 por 1 se esquecer.
+            if (!targetWebhookId && account.proxy_ip) {
+                const allAccounts = await db.getAllAccounts();
+                const peerAccount = allAccounts.find(a =>
+                    a.proxy_ip === account.proxy_ip &&
+                    String(a.proxy_port) === String(account.proxy_port) &&
+                    a.webhook_id
+                );
+
+                if (peerAccount) {
+                    targetWebhookId = peerAccount.webhook_id;
+                    logger.info('Scheduler', `[${name}] Conta sem Webhook vinculado diretamente. Herdando Webhook da conta "${peerAccount.name}" (pois dividem o Proxy ${account.proxy_ip}:${account.proxy_port}).`);
+                }
+            }
+
+            if (targetWebhookId && !isSessionAlreadyReady) {
+                if (account.proxy_ip) {
+                    await this.triggerWebhook(targetWebhookId, name);
+                } else {
+                    logger.info('Scheduler', `[${name}] Webhook ignorado (Conta NÃO possui Proxy configurado). Iniciando direto...`);
+                }
+            } else if (!targetWebhookId && account.proxy_ip && !isSessionAlreadyReady) {
+                logger.warn('Scheduler', `[${name}] ALERTA: Conta possui Proxy, mas NENHUM webhook de rotação foi encontrado no sistema para este proxy.`);
+            }
+
             if (session) {
                 if (session.status === 'disconnected' || session.status === 'destroyed' || session.status === 'error') {
                     // Sessão existe mas o client/browser morreu. Precisa reinicializar do zero.
@@ -209,6 +217,13 @@ class SchedulerManager {
             }
         } catch (error) {
             logger.error('Scheduler', `Erro ao ativar conta ${name}: ${error.message}`);
+
+            // Corrige o estado no Frontend quando houver falha (ex: timeout the proxy)
+            const io = logger.getIO ? logger.getIO() : null;
+            if (io) {
+                io.emit('session:error', { accountName: name, error: error.message });
+            }
+            throw error; // Transmite o erro para cima, seja no /start API ou monitorSchedules()
         }
     }
 
