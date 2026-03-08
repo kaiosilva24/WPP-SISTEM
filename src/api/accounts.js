@@ -559,10 +559,6 @@ router.post('/:id/start', async (req, res) => {
         await schedulerManager.activateAccount(account);
         console.log(`[API] Comando de Sessão enviado para conta ${account.id}`);
 
-        // Força atualização no React
-        const webServer = req.app.get('webServer');
-        if (webServer) webServer.broadcastUpdate();
-
         res.json({ message: 'Sessão iniciada/agendada' });
     } catch (error) {
         console.error(`[API] Erro ao iniciar sessão:`, error);
