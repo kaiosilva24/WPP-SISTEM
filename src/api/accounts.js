@@ -559,6 +559,10 @@ router.post('/:id/start', async (req, res) => {
         await schedulerManager.activateAccount(account);
         console.log(`[API] Comando de Sessão enviado para conta ${account.id}`);
 
+        // Força atualização no React
+        const webServer = req.app.get('webServer');
+        if (webServer) webServer.broadcastUpdate();
+
         res.json({ message: 'Sessão iniciada/agendada' });
     } catch (error) {
         console.error(`[API] Erro ao iniciar sessão:`, error);
@@ -608,6 +612,10 @@ router.post('/:id/clear-session', async (req, res) => {
 
         await db.updateAccountStatus(account.id, 'disconnected');
 
+        // Força atualização no React
+        const webServer = req.app.get('webServer');
+        if (webServer) webServer.broadcastUpdate();
+
         res.json({ message: `Sessão da conta ${account.name} limpa. Clique em Iniciar para escanear novo QR code.` });
     } catch (error) {
         console.error(`[API] Erro ao limpar sessão:`, error);
@@ -623,6 +631,11 @@ router.post('/:id/stop', async (req, res) => {
     try {
         // Parada intencional: preserva token, não reconecta
         await sessionManager.destroySession(req.params.id, { intentional: true, clearAuth: false });
+
+        // Força atualização no React
+        const webServer = req.app.get('webServer');
+        if (webServer) webServer.broadcastUpdate();
+
         res.json({ message: 'Sessão encerrada' });
     } catch (error) {
         res.status(500).json({ error: error.message });

@@ -255,16 +255,19 @@ function App() {
         socket.on('session:authenticated', ({ accountName }) => {
             console.log('✅ Autenticado:', accountName);
             showToast(`${accountName} autenticada!`, 'success');
+            loadAccounts();
         });
 
         socket.on('session:ready', ({ accountName }) => {
             console.log('✅ Pronta:', accountName);
             showToast(`${accountName} conectada!`, 'success');
+            loadAccounts();
         });
 
         socket.on('session:disconnected', ({ accountName }) => {
             console.log('⚠️ Desconectada:', accountName);
             showToast(`${accountName} desconectada`, 'warning');
+            loadAccounts();
         });
 
         // Logs em tempo real por conta
@@ -1293,10 +1296,16 @@ function App() {
                                 </div>
 
                                 <div className="account-actions futuristic-actions">
-                                    {account.status === 'ready' && !account.isPaused && (
-                                        <button className="btn-action action-glow-red" onClick={() => pauseAccount(account.id)} title="Pausar">
+                                    {['ready', 'initializing', 'qr', 'authenticated'].includes(account.status) && !account.isPaused && (
+                                        <button className="btn-action action-glow-red" onClick={() => {
+                                            if (['initializing', 'qr'].includes(account.status)) {
+                                                stopAccount(account.id);
+                                            } else {
+                                                pauseAccount(account.id);
+                                            }
+                                        }} title={['initializing', 'qr'].includes(account.status) ? "Parar Inicialização" : "Pausar"}>
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
-                                            Pausar
+                                            {['initializing', 'qr'].includes(account.status) ? 'Parar' : 'Pausar'}
                                         </button>
                                     )}
                                     {(account.status === 'paused' || account.isPaused) && (
@@ -1305,7 +1314,7 @@ function App() {
                                             Continuar
                                         </button>
                                     )}
-                                    {account.status !== 'ready' && account.status !== 'paused' && !account.isPaused && (
+                                    {!['ready', 'initializing', 'qr', 'authenticated', 'paused'].includes(account.status) && !account.isPaused && (
                                         <button className="btn-action action-glow-green" onClick={() => startAccount(account.id)} title="Iniciar">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5,3 19,12 5,21" /></svg>
                                             Iniciar
