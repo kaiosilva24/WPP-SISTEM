@@ -1,0 +1,376 @@
+diff --git a/node_modules/whatsapp-web.js/src/Client.js b/node_modules/whatsapp-web.js/src/Client.js
+index f68491f..72935ec 100644
+--- a/node_modules/whatsapp-web.js/src/Client.js
++++ b/node_modules/whatsapp-web.js/src/Client.js
+@@ -17,7 +17,7 @@ const ContactFactory = require('./factories/ContactFactory');
+ const WebCacheFactory = require('./webCache/WebCacheFactory');
+ const { ClientInfo, Message, MessageMedia, Contact, Location, Poll, PollVote, GroupNotification, Label, Call, Buttons, List, Reaction, Broadcast, ScheduledEvent } = require('./structures');
+ const NoAuth = require('./authStrategies/NoAuth');
+-const {exposeFunctionIfAbsent} = require('./util/Puppeteer');
++const { exposeFunctionIfAbsent } = require('./util/Puppeteer');
+ 
+ /**
+  * Starting point for interacting with the WhatsApp Web API
+@@ -69,7 +69,7 @@ class Client extends EventEmitter {
+ 
+         this.options = Util.mergeDefault(DefaultOptions, options);
+ 
+-        if(!this.options.authStrategy) {
++        if (!this.options.authStrategy) {
+             this.authStrategy = new NoAuth();
+         } else {
+             this.authStrategy = this.options.authStrategy;
+@@ -96,18 +96,18 @@ class Client extends EventEmitter {
+      * Private function
+      */
+     async inject() {
+-        if(this.options.authTimeoutMs === undefined || this.options.authTimeoutMs==0){
++        if (this.options.authTimeoutMs === undefined || this.options.authTimeoutMs == 0) {
+             this.options.authTimeoutMs = 30000;
+         }
+         let start = Date.now();
+         let timeout = this.options.authTimeoutMs;
+         let res = false;
+-        while(start > (Date.now() - timeout)){
++        while (start > (Date.now() - timeout)) {
+             res = await this.pupPage.evaluate('window.Debug?.VERSION != undefined');
+-            if(res){break;}
++            if (res) { break; }
+             await new Promise(r => setTimeout(r, 200));
+         }
+-        if(!res){ 
++        if (!res) {
+             throw 'auth timeout';
+         }
+         await this.setDeviceName(this.options.deviceName, this.options.browserName);
+@@ -142,7 +142,7 @@ class Client extends EventEmitter {
+         if (needAuthentication) {
+             const { failed, failureEventPayload, restart } = await this.authStrategy.onAuthenticationNeeded();
+ 
+-            if(failed) {
++            if (failed) {
+                 /**
+                  * Emitted when there has been an error while trying to restore an existing session
+                  * @event Client#auth_failure
+@@ -241,13 +241,13 @@ class Client extends EventEmitter {
+                 }
+                 let start = Date.now();
+                 let res = false;
+-                while(start > (Date.now() - 30000)){
++                while (start > (Date.now() - 30000)) {
+                     // Check window.Store Injection
+                     res = await this.pupPage.evaluate('window.Store != undefined');
+-                    if(res){break;}
++                    if (res) { break; }
+                     await new Promise(r => setTimeout(r, 200));
+                 }
+-                if(!res){
++                if (!res) {
+                     throw 'ready timeout';
+                 }
+ 
+@@ -282,7 +282,7 @@ class Client extends EventEmitter {
+         });
+         await exposeFunctionIfAbsent(this.pupPage, 'onLogoutEvent', async () => {
+             this.lastLoggedOut = true;
+-            await this.pupPage.waitForNavigation({waitUntil: 'load', timeout: 5000}).catch((_) => _);
++            await this.pupPage.waitForNavigation({ waitUntil: 'load', timeout: 5000 }).catch((_) => _);
+         });
+         await this.pupPage.evaluate(() => {
+             window.AuthStore.AppState.on('change:state', (_AppState, state) => { window.onAuthAppStateChangedEvent(state); });
+@@ -322,20 +322,20 @@ class Client extends EventEmitter {
+             page = await browser.newPage();
+         } else {
+             const browserArgs = [...(puppeteerOpts.args || [])];
+-            if(this.options.userAgent !== false && !browserArgs.find(arg => arg.includes('--user-agent'))) {
++            if (this.options.userAgent !== false && !browserArgs.find(arg => arg.includes('--user-agent'))) {
+                 browserArgs.push(`--user-agent=${this.options.userAgent}`);
+             }
+             // navigator.webdriver fix
+             browserArgs.push('--disable-blink-features=AutomationControlled');
+ 
+-            browser = await puppeteer.launch({...puppeteerOpts, args: browserArgs});
++            browser = await puppeteer.launch({ ...puppeteerOpts, args: browserArgs });
+             page = (await browser.pages())[0];
+         }
+ 
+         if (this.options.proxyAuthentication !== undefined) {
+             await page.authenticate(this.options.proxyAuthentication);
+         }
+-        if(this.options.userAgent !== false) {
++        if (this.options.userAgent !== false) {
+             await page.setUserAgent(this.options.userAgent);
+         }
+         if (this.options.bypassCSP) await page.setBypassCSP(true);
+@@ -352,6 +352,9 @@ class Client extends EventEmitter {
+ 
+         // ocVersion (isOfficialClient patch)
+         // remove after 2.3000.x hard release
++        // (WPP-SISTEM FIX): Overwriting native Error prototype breaks Dexie/IndexedDB Exception loops 
++        // when DB has minor corrupted entries. Removing to prevent 100% CPU deadlock.
++        /*
+         await page.evaluateOnNewDocument(() => {
+             const originalError = Error;
+             window.originalError = originalError;
+@@ -363,6 +366,7 @@ class Client extends EventEmitter {
+                 return error;
+             };
+         });
++        */
+ 
+         await page.goto(WhatsWebURL, {
+             waitUntil: 'load',
+@@ -373,7 +377,7 @@ class Client extends EventEmitter {
+         await this.inject();
+ 
+         this.pupPage.on('framenavigated', async (frame) => {
+-            if(frame.url().includes('post_logout=1') || this.lastLoggedOut) {
++            if (frame.url().includes('post_logout=1') || this.lastLoggedOut) {
+                 this.emit(Events.DISCONNECTED, 'LOGOUT');
+                 await this.authStrategy.logout();
+                 await this.authStrategy.beforeBrowserInitialized();
+@@ -579,7 +583,7 @@ class Client extends EventEmitter {
+ 
+         });
+ 
+-        await exposeFunctionIfAbsent(this.pupPage, 'onChatUnreadCountEvent', async (data) =>{
++        await exposeFunctionIfAbsent(this.pupPage, 'onChatUnreadCountEvent', async (data) => {
+             const chat = await this.getChatById(data.id);
+ 
+             /**
+@@ -713,7 +717,7 @@ class Client extends EventEmitter {
+ 
+         await exposeFunctionIfAbsent(this.pupPage, 'onEditMessageEvent', (msg, newBody, prevBody) => {
+ 
+-            if(msg.type === 'revoked'){
++            if (msg.type === 'revoked') {
+                 return;
+             }
+             /**
+@@ -764,7 +768,7 @@ class Client extends EventEmitter {
+             window.Store.Chat.on('change:archive', async (chat, currState, prevState) => { window.onArchiveChatEvent(await window.WWebJS.getChatModel(chat), currState, prevState); });
+             window.Store.Msg.on('add', (msg) => {
+                 if (msg.isNewMsg) {
+-                    if(msg.type === 'ciphertext') {
++                    if (msg.type === 'ciphertext') {
+                         // defer message event until ciphertext is resolved (type changed)
+                         msg.once('change:type', (_msg) => window.onAddMessageEvent(window.WWebJS.getMessageModel(_msg)));
+                         window.onAddMessageCiphertextEvent(window.WWebJS.getMessageModel(msg));
+@@ -773,7 +777,7 @@ class Client extends EventEmitter {
+                     }
+                 }
+             });
+-            window.Store.Chat.on('change:unreadCount', (chat) => {window.onChatUnreadCountEvent(chat);});
++            window.Store.Chat.on('change:unreadCount', (chat) => { window.onChatUnreadCountEvent(chat); });
+ 
+             if (window.compareWwebVersions(window.Debug.VERSION, '>=', '2.3000.1014111620')) {
+                 const module = window.Store.AddonReactionTable;
+@@ -786,7 +790,7 @@ class Client extends EventEmitter {
+                         const sender = reaction.author ?? reaction.from;
+                         const senderUserJid = sender._serialized;
+ 
+-                        return {...reaction, msgKey, parentMsgKey, senderUserJid, timestamp };
++                        return { ...reaction, msgKey, parentMsgKey, senderUserJid, timestamp };
+                     }));
+ 
+                     return ogMethod(...args);
+@@ -833,7 +837,7 @@ class Client extends EventEmitter {
+                         const parentMsgKey = window.Store.MsgKey.fromString(reaction.parentMsgKey);
+                         const timestamp = reaction.timestamp / 1000;
+ 
+-                        return {...reaction, msgKey, parentMsgKey, timestamp };
++                        return { ...reaction, msgKey, parentMsgKey, timestamp };
+                     }));
+ 
+                     return ogMethod(...args);
+@@ -849,10 +853,10 @@ class Client extends EventEmitter {
+         const requestedVersion = this.options.webVersion;
+         const versionContent = await webCache.resolve(requestedVersion);
+ 
+-        if(versionContent) {
++        if (versionContent) {
+             await this.pupPage.setRequestInterception(true);
+             this.pupPage.on('request', async (req) => {
+-                if(req.url() === WhatsWebURL) {
++                if (req.url() === WhatsWebURL) {
+                     req.respond({
+                         status: 200,
+                         contentType: 'text/html',
+@@ -864,7 +868,7 @@ class Client extends EventEmitter {
+             });
+         } else {
+             this.pupPage.on('response', async (res) => {
+-                if(res.ok() && res.url() === WhatsWebURL) {
++                if (res.ok() && res.url() === WhatsWebURL) {
+                     const indexHtml = await res.text();
+                     this.currentIndexHtml = indexHtml;
+                 }
+@@ -1038,12 +1042,12 @@ class Client extends EventEmitter {
+         if (content instanceof MessageMedia) {
+             internalOptions.media = content;
+             internalOptions.isViewOnce = options.isViewOnce,
+-            content = '';
++                content = '';
+         } else if (options.media instanceof MessageMedia) {
+             internalOptions.media = options.media;
+             internalOptions.caption = content;
+             internalOptions.isViewOnce = options.isViewOnce,
+-            content = '';
++                content = '';
+         } else if (content instanceof Location) {
+             internalOptions.location = content;
+             content = '';
+@@ -1073,10 +1077,10 @@ class Client extends EventEmitter {
+         if (internalOptions.sendMediaAsSticker && internalOptions.media) {
+             internalOptions.media = await Util.formatToWebpSticker(
+                 internalOptions.media, {
+-                    name: options.stickerName,
+-                    author: options.stickerAuthor,
+-                    categories: options.stickerCategories
+-                }, this.pupPage
++                name: options.stickerName,
++                author: options.stickerAuthor,
++                categories: options.stickerCategories
++            }, this.pupPage
+             );
+         }
+ 
+@@ -1247,7 +1251,7 @@ class Client extends EventEmitter {
+     async getMessageById(messageId) {
+         const msg = await this.pupPage.evaluate(async messageId => {
+             let msg = window.Store.Msg.get(messageId);
+-            if(msg) return window.WWebJS.getMessageModel(msg);
++            if (msg) return window.WWebJS.getMessageModel(msg);
+ 
+             const params = messageId.split('_');
+             if (params.length !== 3 && params.length !== 4) throw new Error('Invalid serialized message id specified');
+@@ -1255,10 +1259,10 @@ class Client extends EventEmitter {
+             let messagesObject = await window.Store.Msg.getMessagesById([messageId]);
+             if (messagesObject && messagesObject.messages.length) msg = messagesObject.messages[0];
+ 
+-            if(msg) return window.WWebJS.getMessageModel(msg);
++            if (msg) return window.WWebJS.getMessageModel(msg);
+         }, messageId);
+ 
+-        if(msg) return new Message(this, msg);
++        if (msg) return new Message(this, msg);
+         return null;
+     }
+ 
+@@ -1404,7 +1408,7 @@ class Client extends EventEmitter {
+      */
+     async setDisplayName(displayName) {
+         const couldSet = await this.pupPage.evaluate(async displayName => {
+-            if(!window.Store.Conn.canSetMyPushname()) return false;
++            if (!window.Store.Conn.canSetMyPushname()) return false;
+             await window.Store.Settings.setPushname(displayName);
+             return true;
+         }, displayName);
+@@ -1418,7 +1422,7 @@ class Client extends EventEmitter {
+      */
+     async getState() {
+         return await this.pupPage.evaluate(() => {
+-            if(!window.Store) return null;
++            if (!window.Store) return null;
+             return window.Store.AppState.state;
+         });
+     }
+@@ -1530,7 +1534,7 @@ class Client extends EventEmitter {
+      * @param {number} unmuteDateTs Timestamp at which the chat will be unmuted
+      * @returns {Promise<{isMuted: boolean, muteExpiration: number}>}
+      */
+-    async _muteUnmuteChat (chatId, action, unmuteDateTs) {
++    async _muteUnmuteChat(chatId, action, unmuteDateTs) {
+         return this.pupPage.evaluate(async (chatId, action, unmuteDateTs) => {
+             const chat = window.Store.Chat.get(chatId) ?? await window.Store.Chat.find(chatId);
+             action === 'MUTE'
+@@ -1564,7 +1568,7 @@ class Client extends EventEmitter {
+                     ? await window.Store.ProfilePic.profilePicFind(chatWid)
+                     : await window.Store.ProfilePic.requestProfilePicFromServer(chatWid);
+             } catch (err) {
+-                if(err.name === 'ServerStatusCodeError') return undefined;
++                if (err.name === 'ServerStatusCodeError') return undefined;
+                 throw err;
+             }
+         }, contactId);
+@@ -1582,8 +1586,8 @@ class Client extends EventEmitter {
+             let contact = window.Store.Contact.get(contactId);
+             if (!contact) {
+                 const wid = window.Store.WidFactory.createWid(contactId);
+-                const chatConstructor = window.Store.Contact.getModelsArray().find(c=>!c.isGroup).constructor;
+-                contact = new chatConstructor({id: wid});
++                const chatConstructor = window.Store.Contact.getModelsArray().find(c => !c.isGroup).constructor;
++                contact = new chatConstructor({ id: wid });
+             }
+ 
+             if (contact.commonGroups) {
+@@ -2174,12 +2178,12 @@ class Client extends EventEmitter {
+             const labels = window.WWebJS.getLabels().filter(e => labelIds.find(l => l == e.id) !== undefined);
+             const chats = window.Store.Chat.filter(e => chatIds.includes(e.id._serialized));
+ 
+-            let actions = labels.map(label => ({id: label.id, type: 'add'}));
++            let actions = labels.map(label => ({ id: label.id, type: 'add' }));
+ 
+             chats.forEach(chat => {
+                 (chat.labels || []).forEach(n => {
+                     if (!actions.find(e => e.id == n)) {
+-                        actions.push({id: n, type: 'remove'});
++                        actions.push({ id: n, type: 'remove' });
+                     }
+                 });
+             });
+@@ -2412,16 +2416,15 @@ class Client extends EventEmitter {
+      * @param {boolean} [syncToAddressbook = false] If set to true, the contact will also be saved to the user's address book on their phone. False by default
+      * @returns {Promise<void>}
+      */
+-    async saveOrEditAddressbookContact(phoneNumber, firstName, lastName, syncToAddressbook = false)
+-    {
++    async saveOrEditAddressbookContact(phoneNumber, firstName, lastName, syncToAddressbook = false) {
+         return await this.pupPage.evaluate(async (phoneNumber, firstName, lastName, syncToAddressbook) => {
+             return await window.Store.AddressbookContactUtils.saveContactAction({
+-                'firstName' : firstName,
+-                'lastName' : lastName,
+-                'phoneNumber' : phoneNumber,
+-                'prevPhoneNumber' : phoneNumber,
++                'firstName': firstName,
++                'lastName': lastName,
++                'phoneNumber': phoneNumber,
++                'prevPhoneNumber': phoneNumber,
+                 'syncToAddressbook': syncToAddressbook,
+-                'username' : undefined
++                'username': undefined
+             });
+         }, phoneNumber, firstName, lastName, syncToAddressbook);
+     }
+@@ -2431,11 +2434,10 @@ class Client extends EventEmitter {
+      * @param {string} phoneNumber The contact's phone number in a format "17182222222", where "1" is a country code
+      * @returns {Promise<void>}
+      */
+-    async deleteAddressbookContact(phoneNumber)
+-    {
++    async deleteAddressbookContact(phoneNumber) {
+         return await this.pupPage.evaluate(async (phoneNumber) => {
+             const wid = window.Store.WidFactory.createWid(phoneNumber);
+-            return await window.Store.AddressbookContactUtils.deleteContactAction({phoneNumber: wid});
++            return await window.Store.AddressbookContactUtils.deleteContactAction({ phoneNumber: wid });
+         }, phoneNumber);
+     }
+ 
+@@ -2520,7 +2522,7 @@ class Client extends EventEmitter {
+         if (!msg) return [];
+         if (msg.type != MessageTypes.POLL_CREATION) throw 'Invalid usage! Can only be used with a pollCreation message';
+ 
+-        const pollVotes = await this.pupPage.evaluate( async (msg) => {
++        const pollVotes = await this.pupPage.evaluate(async (msg) => {
+             const msgKey = window.Store.MsgKey.fromString(msg.id._serialized);
+             let pollVotes = await window.Store.PollsVotesSchema.getTable().equals(['parentMsgKey'], msgKey.toString());
+ 
+@@ -2533,7 +2535,7 @@ class Client extends EventEmitter {
+             });
+         }, msg);
+ 
+-        return pollVotes.map((pollVote) => new PollVote(this.client, {...pollVote, parentMessage: msg}));
++        return pollVotes.map((pollVote) => new PollVote(this.client, { ...pollVote, parentMessage: msg }));
+     }
+ }
+ 

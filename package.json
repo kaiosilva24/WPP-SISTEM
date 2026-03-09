@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "test": "echo \"Sistema de Aquecimento WhatsApp\" && exit 0"
+    "test": "echo \"Sistema de Aquecimento WhatsApp\" && exit 0",
+    "postinstall": "patch-package"
   },
   "keywords": [
     "whatsapp",
@@ -30,7 +31,9 @@
     "jsonwebtoken": "^9.0.3",
     "moment-timezone": "^0.5.45",
     "multer": "^2.0.2",
+    "patch-package": "^8.0.1",
     "pg": "^8.18.0",
+    "postinstall-postinstall": "^2.1.0",
     "proxy-chain": "^2.7.1",
     "puppeteer": "^24.37.1",
     "puppeteer-extra": "^3.3.6",
