@@ -315,15 +315,8 @@ class WhatsAppSession extends EventEmitter {
             // Limpa automaticamente para gerar QR novo na próxima tentativa
             const errStr = String(errMsg).toLowerCase();
             if (errStr.includes('auth timeout') || errStr.includes('auth_timeout')) {
-                logger.warn(this.accountName, `⚠️ Auth timeout = sessão corrompida. Limpando PostgreSQL para gerar QR novo...`);
-                try {
-                    const db = require('../database/DatabaseManager');
-                    const sessionId = `RemoteAuth-account-${this.accountId}`;
-                    await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [sessionId]);
-                    logger.warn(this.accountName, `🗑️ Sessão '${sessionId}' removida. Próximo start gerará QR code NOVO.`);
-                } catch (clearErr) {
-                    logger.error(this.accountName, `Erro ao limpar sessão corrompida: ${clearErr.message}`);
-                }
+                logger.warn(this.accountName, `⚠️ Auth timeout. O WhatsApp Web demorou muito para autenticar (pode ser proxy lento).`);
+                logger.info(this.accountName, `💡 Sessão preservada no Banco de Dados para a próxima tentativa.`);
             }
 
             this.status = 'error';
@@ -662,12 +655,11 @@ class WhatsAppSession extends EventEmitter {
                             this._injectFailCount = (this._injectFailCount || 0) + 1;
                             const db = require('../database/DatabaseManager');
                             if (this._injectFailCount >= 2) {
-                                logger.warn(this.accountName, `🗑️ 2ª falha consecutiva. Limpando sessão PostgreSQL...`);
+                                logger.warn(this.accountName, `❌ 2ª falha consecutiva de falha de injeção ou crash de RAM.`);
                                 try {
-                                    await this.destroy(true);
-                                    await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [`RemoteAuth-account-${this.accountId}`]);
+                                    await this.destroy(false);
                                     await db.updateAccountStatus(this.accountId, 'disconnected');
-                                    logger.warn(this.accountName, `🗑️ Sessão limpa. Próximo start = novo QR.`);
+                                    logger.warn(this.accountName, `💡 Sessão preservada de forma segura! Reinicie a conta no painel para tentar novamente.`);
                                     this._injectFailCount = 0;
                                 } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
                             } else {
@@ -742,11 +734,10 @@ class WhatsAppSession extends EventEmitter {
                     const db = require('../database/DatabaseManager');
 
                     if (this._injectFailCount >= 2) {
-                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x. Limpando sessão PostgreSQL...`);
+                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x por gargalo extremo (delay > 120s) ou falha grave.`);
                         try {
-                            await this.destroy(true);
-                            await db.pool.query('DELETE FROM wwebjs_sessions WHERE session_id = $1', [`RemoteAuth-account-${this.accountId}`]);
-                            logger.warn(this.accountName, `🗑️ Sessão limpa. Próximo start = novo QR code.`);
+                            await this.destroy(false);
+                            logger.warn(this.accountName, `💡 Sessão preservada! Tentaremos recomeçar a conexão do zero, inicie a conta no painel.`);
                             await db.updateAccountStatus(this.accountId, 'disconnected');
                             this._injectFailCount = 0;
                         } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
