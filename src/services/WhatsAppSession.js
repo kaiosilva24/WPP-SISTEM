@@ -213,7 +213,16 @@ class WhatsAppSession extends EventEmitter {
                 // Cria proxy local anônimo que encaminha para o proxy real
                 // Isso elimina a necessidade de autenticação no navegador!
                 logger.info(this.accountName, 'Criando proxy local anônimo...');
-                anonymizedProxyUrl = await proxyChain.anonymizeProxy(proxyUrl);
+                try {
+                    // Evita travamento infinito caso o proxy abra a porta mas retenha conexões SSL (TCP Blackhole)
+                    anonymizedProxyUrl = await Promise.race([
+                        proxyChain.anonymizeProxy(proxyUrl),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout de 15s excedido ao criar o proxy local.')), 15000))
+                    ]);
+                } catch (err) {
+                    this.status = 'error';
+                    throw new Error(`Falha ao criar proxy anônimo: ${err.message}`);
+                }
                 this.anonymizedProxyUrl = anonymizedProxyUrl; // Salva para cleanup
                 this.originalProxyUrl = proxyUrl;
                 this.anonymizedProxyPort = new URL(anonymizedProxyUrl).port;
