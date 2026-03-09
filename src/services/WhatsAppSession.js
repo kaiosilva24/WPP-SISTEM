@@ -287,6 +287,10 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-prompt-on-repost',
                         '--disable-web-security',                   // Reduz verificações de CORS locais
                         '--disable-site-isolation-trials',          // Desativa isolamento de RAM estrito por site
+                        '--disable-application-cache',
+                        '--disk-cache-size=1',
+                        '--media-cache-size=1',
+                        '--disable-offline-load-stale-cache',
                         '--disable-gpu',
                         '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways',
 
@@ -359,21 +363,22 @@ class WhatsAppSession extends EventEmitter {
     async cleanUserDataDir(profilePath) {
         const fs = require('fs');
         const p = require('path');
-        const lockFiles = [
+        const targets = [
             p.join(profilePath, 'SingletonLock'),
             p.join(profilePath, 'SingletonSocket'),
             p.join(profilePath, 'SingletonCookie'),
             p.join(profilePath, 'Default', 'lockfile'),
+            p.join(profilePath, 'Default', 'Service Worker'),
+            p.join(profilePath, 'Default', 'Cache'),
+            p.join(profilePath, 'Default', 'Code Cache')
         ];
-        for (const lockFile of lockFiles) {
+        for (const target of targets) {
             try {
-                // IMPORTANTE: No Linux, SingletonLock é um SYMLINK.
-                // fs.existsSync() retorna FALSE para symlinks quebrados (quando container reinicia).
-                // fs.lstatSync() detecta o symlink mesmo quebrado, permitindo removê-lo.
-                fs.lstatSync(lockFile);
-                fs.unlinkSync(lockFile);
-                console.log('[CHROMIUM] Lock file removido:', p.basename(lockFile));
-            } catch (e) { /* arquivo não existe — ok */ }
+                if (fs.existsSync(target) || (fs.lstatSync && fs.lstatSync(target))) {
+                    fs.rmSync(target, { recursive: true, force: true });
+                    console.log('[CHROMIUM] Target removido (Lock/Cache):', p.basename(target));
+                }
+            } catch (e) { /* target não existe — ok */ }
         }
     }
 
