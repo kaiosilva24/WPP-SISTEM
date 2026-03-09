@@ -287,10 +287,6 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-prompt-on-repost',
                         '--disable-web-security',                   // Reduz verificações de CORS locais
                         '--disable-site-isolation-trials',          // Desativa isolamento de RAM estrito por site
-                        '--disable-application-cache',
-                        '--disk-cache-size=1',
-                        '--media-cache-size=1',
-                        '--disable-offline-load-stale-cache',
                         '--disable-gpu',
                         '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways',
 
