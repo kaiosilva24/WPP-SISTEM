@@ -277,8 +277,12 @@ class WhatsAppSession extends EventEmitter {
                         '--no-recovery-component',
                         '--disable-session-crashed-bubble',
                         '--disable-background-timer-throttling',
+                        '--disable-hang-monitor',                   // Impede o Chrome de fechar a aba se o DB ler muito devagar
+                        '--disable-prompt-on-repost',
+                        '--disable-web-security',                   // Reduz verificações de CORS locais
+                        '--disable-site-isolation-trials',          // Desativa isolamento de RAM estrito por site
                         '--disable-gpu',
-                        '--disable-features=IsolateOrigins,site-per-process',
+                        '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways',
 
                         // RemoteAuth gerencia o --user-data-dir internamente
 
