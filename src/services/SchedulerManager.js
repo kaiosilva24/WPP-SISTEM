@@ -151,6 +151,11 @@ class SchedulerManager {
 
             const isSessionAlreadyReady = session && (session.status === 'ready' || session.status === 'authenticated') && !session.isPaused;
 
+            if (session && session.isInitializing) {
+                logger.warn('Scheduler', `[${name}] Sessão já está em processo de inicialização. Abortando ativação simultânea para evitar colisões no Webhook do Proxy.`);
+                return;
+            }
+
             let targetWebhookId = webhook_id;
 
             // Se a conta não tem webhook_id explícito, mas TEM proxy, tentamos "copiar" o webhook de outra conta 

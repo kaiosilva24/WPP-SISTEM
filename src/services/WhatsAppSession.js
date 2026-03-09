@@ -181,7 +181,13 @@ class WhatsAppSession extends EventEmitter {
      * Inicializa a sessão
      */
     async initialize() {
+        if (this.isInitializing) {
+            logger.warn(this.accountName, `Sessão já está inicializando! Bloqueando chamada simultânea.`);
+            return;
+        }
+
         try {
+            this.isInitializing = true;
             this.status = 'initializing';
 
             // 1. Validação do Proxy (Obrigatória se habilitado)
@@ -320,6 +326,7 @@ class WhatsAppSession extends EventEmitter {
             this.injectWebRTCBlocker();
 
             await this.client.initialize();
+            this.isInitializing = false;
 
         } catch (error) {
             const errMsg = error?.message || error?.toString?.() || JSON.stringify(error) || 'Erro desconhecido';
@@ -337,6 +344,7 @@ class WhatsAppSession extends EventEmitter {
             }
 
             this.status = 'error';
+            this.isInitializing = false;
             this.emit('error', error);
             throw error;
         }
@@ -542,34 +550,45 @@ class WhatsAppSession extends EventEmitter {
 
             logger.info(this.accountName, `Validando proxy ${this.config.proxy_ip}:${this.config.proxy_port}...`);
 
-            // Constrói URL do proxy
             const proxyUrl = this.config.proxy_username && this.config.proxy_password
                 ? `http://${this.config.proxy_username}:${this.config.proxy_password}@${this.config.proxy_ip}:${this.config.proxy_port}`
                 : `http://${this.config.proxy_ip}:${this.config.proxy_port}`;
 
-            // Cria o agente
             const agent = new HttpsProxyAgent(proxyUrl);
 
-            // Testa conexão usando o agente HTTPS em um endpoint HTTPS!
-            // Endpoint HTTP + HttpsProxyAgent = falha de CONNECT no proxy na porta 80.
-            const response = await axios.get('https://api.ipify.org?format=json', {
-                httpsAgent: agent,
-                timeout: 15000 // Aumentado para lidar com delay na troca de rota de IPs
-            });
+            // 3 Tentativas para lidar com rotação de IP demorada (Painéis 3G/4G ressetando placa GSM)
+            let lastError = null;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    if (attempt > 1) {
+                        logger.info(this.accountName, `Tentativa ${attempt}/3 de validação do proxy. Aguardando 5s...`);
+                        await new Promise(r => setTimeout(r, 5000));
+                    }
 
-            if (response.data && response.data.ip) {
-                this.publicIP = response.data.ip;
-                this.isp = 'Desconhecido'; // api.ipify não retorna ISP, mas garante a conexão
-                this.country = 'Desconhecido';
-                this.city = 'Desconhecido';
+                    const response = await axios.get('https://api.ipify.org?format=json', {
+                        httpsAgent: agent,
+                        timeout: 15000
+                    });
 
-                logger.info(this.accountName, `Proxy validado. IP Externo: ${this.publicIP}`);
-                return true;
+                    if (response.data && response.data.ip) {
+                        this.publicIP = response.data.ip;
+                        this.isp = 'Desconhecido';
+                        this.country = 'Desconhecido';
+                        this.city = 'Desconhecido';
+
+                        logger.info(this.accountName, `Proxy validado. IP Externo: ${this.publicIP}`);
+                        return true;
+                    }
+                } catch (err) {
+                    lastError = err;
+                    logger.warn(this.accountName, `Falha na tentativa ${attempt} do proxy: ${err.message}`);
+                }
             }
 
+            logger.error(this.accountName, `Erro validação proxy após 3 tentativas: ${lastError?.message}`);
             return false;
         } catch (error) {
-            logger.error(this.accountName, `Erro validação proxy: ${error.message}`);
+            logger.error(this.accountName, `Erro estrutural validação proxy: ${error.message}`);
             return false;
         }
     }
