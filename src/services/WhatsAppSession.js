@@ -648,8 +648,8 @@ class WhatsAppSession extends EventEmitter {
                         logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está ocupado e bloqueando o Puppeteer (${this._evalTimeoutCount}x). Aguardando liberação...`);
                         this._pageErrorCount = 0;
 
-                        if (this._evalTimeoutCount >= 12) { // 2 minutos de deadlock da RAM da página
-                            logger.error(this.accountName, `🚨 [DIAG] Deadlock persistente detectado! A página do WhatsApp congelou na VPS. Dando F5 (reload) forçado na aba...`);
+                        if (this._evalTimeoutCount >= 60) { // 5 minutos de espera para carregamento extremo na Discloud
+                            logger.error(this.accountName, `🚨 [DIAG] Deadlock persistente detectado (5 mins)! A página do WhatsApp congelou na VPS. Dando F5 (reload) forçado na aba...`);
                             this._evalTimeoutCount = 0;
                             try {
                                 await this.client.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -732,7 +732,7 @@ class WhatsAppSession extends EventEmitter {
                     const db = require('../database/DatabaseManager');
 
                     if (this._injectFailCount >= 5) {
-                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x por gargalo extremo (delay > 120s) ou falha grave.`);
+                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x por gargalo extremo (delay > 360s) ou falha grave.`);
                         try {
                             await this.destroy(false);
                             logger.warn(this.accountName, `💡 Sessão preservada! Tentaremos recomeçar a conexão do zero, inicie a conta no painel.`);
@@ -740,7 +740,7 @@ class WhatsAppSession extends EventEmitter {
                             this._injectFailCount = 0;
                         } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
                     } else {
-                        logger.warn(this.accountName, `⚠️ Inject preso por 180s (tentativa ${this._injectFailCount}/5). Preservando sessão e recomeçando...`);
+                        logger.warn(this.accountName, `⚠️ Inject preso por 360s (tentativa ${this._injectFailCount}/5). Preservando sessão e recomeçando...`);
                         try {
                             await this.destroy(false);
                             await db.updateAccountStatus(this.accountId, 'disconnected');
@@ -752,7 +752,7 @@ class WhatsAppSession extends EventEmitter {
                     }
                     this.emit('inject_timeout');
                 }
-            }, 180000); // 180 segundos (3 minutos) tolerância máxima para carregamento em VPS gaga
+            }, 360000); // 360 segundos (6 minutos) tolerância máxima para VPS super lentas
         });
 
         // Pronto
