@@ -637,7 +637,7 @@ class WhatsAppSession extends EventEmitter {
                             try { result.wwebjsReady = !!(window.WWebJS && window.WWebJS.sendMessage); } catch (e) { result.wwebjsReady = false; }
                             return result;
                         }).catch(() => ({ appState: 'PAGE_ERROR', hasSynced: '?', wwebjsReady: false })),
-                        new Promise(resolve => setTimeout(() => resolve({ appState: 'EVAL_TIMEOUT', hasSynced: '?', wwebjsReady: false }), 4000))
+                        new Promise(resolve => setTimeout(() => resolve({ appState: 'EVAL_TIMEOUT', hasSynced: '?', wwebjsReady: false }), 10000))
                     ]);
 
                     logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | hasSynced=${diag.hasSynced} | WWebJS=${diag.wwebjsReady}`);
@@ -645,7 +645,7 @@ class WhatsAppSession extends EventEmitter {
                     // CASO 1: PAGE_ERROR/EVAL_TIMEOUT — página crashou ou inject bloqueando
                     if (diag.appState === 'PAGE_ERROR' || diag.appState === 'ERRO' || diag.appState === 'EVAL_TIMEOUT') {
                         this._pageErrorCount++;
-                        if (this._pageErrorCount >= 2) { // 10s confirmação
+                        if (this._pageErrorCount >= 4) { // 20s confirmação (aumentado para suportar VPS lentas)
                             const reason = diag.appState === 'EVAL_TIMEOUT' ? 'Inject travado (evaluate timeout)' : 'Página crashou';
                             logger.error(this.accountName, `💀 [DIAG] ${reason} (${this._pageErrorCount}x). Recovery imediato!`);
                             clearInterval(this._diagnosticInterval); this._diagnosticInterval = null;
@@ -654,8 +654,8 @@ class WhatsAppSession extends EventEmitter {
                             // Dispara recovery diretamente
                             this._injectFailCount = (this._injectFailCount || 0) + 1;
                             const db = require('../database/DatabaseManager');
-                            if (this._injectFailCount >= 2) {
-                                logger.warn(this.accountName, `❌ 2ª falha consecutiva de falha de injeção ou crash de RAM.`);
+                            if (this._injectFailCount >= 5) {
+                                logger.warn(this.accountName, `❌ ${this._injectFailCount}ª falha consecutiva de falha de injeção ou crash de RAM.`);
                                 try {
                                     await this.destroy(false);
                                     await db.updateAccountStatus(this.accountId, 'disconnected');
@@ -733,7 +733,7 @@ class WhatsAppSession extends EventEmitter {
                     this._injectFailCount++;
                     const db = require('../database/DatabaseManager');
 
-                    if (this._injectFailCount >= 2) {
+                    if (this._injectFailCount >= 5) {
                         logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x por gargalo extremo (delay > 120s) ou falha grave.`);
                         try {
                             await this.destroy(false);
@@ -1413,7 +1413,7 @@ class WhatsAppSession extends EventEmitter {
             if (this._injectRecoveryTimeout) { clearTimeout(this._injectRecoveryTimeout); this._injectRecoveryTimeout = null; }
 
             if (this.client) {
-                logger.info(this.accountName, `Destruindo sessão... (clearAuth: ${clearAuth})`);
+                logger.info(this.accountName, `Encerrando instância local temporariamente... (clearAuth: ${clearAuth})`);
 
                 // Salva referência ao browser ANTES de qualquer operação
                 const browser = this.client.pupBrowser;
