@@ -644,14 +644,27 @@ class WhatsAppSession extends EventEmitter {
 
                     // CASO 1: EVAL_TIMEOUT — página bloqueada, provável carregamento pesado
                     if (diag.appState === 'EVAL_TIMEOUT') {
-                        logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está muito ocupado e bloqueando o Puppeteer. A injeção está demorando. Aguardando liberação de CPU...`);
+                        this._evalTimeoutCount = (this._evalTimeoutCount || 0) + 1;
+                        logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está ocupado e bloqueando o Puppeteer (${this._evalTimeoutCount}x). Aguardando liberação...`);
                         this._pageErrorCount = 0;
+
+                        if (this._evalTimeoutCount >= 4) { // Puta deadlock da RAM da página
+                            logger.error(this.accountName, `🚨 [DIAG] Deadlock detectado! A página do WhatsApp congelou na VPS. Dando F5 (reload) forçado na aba...`);
+                            this._evalTimeoutCount = 0;
+                            try {
+                                await this.client.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+                                logger.info(this.accountName, `🔄 [DIAG] F5 executado com sucesso!`);
+                            } catch (e) {
+                                logger.error(this.accountName, `Erro ao dar F5 na aba travada: ${e.message}`);
+                            }
+                        }
                     }
                     // CASO 2: PAGE_ERROR — página com certeza crashou internamente
                     else if (diag.appState === 'PAGE_ERROR' || diag.appState === 'ERRO') {
+                        this._evalTimeoutCount = 0;
                         this._pageErrorCount++;
                         if (this._pageErrorCount >= 4) { // 20s confirmação
-                            logger.error(this.accountName, `💀 [DIAG] Página crashou (${this._pageErrorCount}x). Recarregando a página pelo navegador para tentar recuperar...`);
+                            logger.error(this.accountName, `💀 [DIAG] Página crashou (${this._pageErrorCount}x). Recarregando a página (F5) para tentar recuperar...`);
                             this._pageErrorCount = 0;
                             try {
                                 await this.client.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -662,6 +675,7 @@ class WhatsAppSession extends EventEmitter {
                     }
                     // CASO 2: CONNECTED + hasSynced mas WWebJS ausente → re-inject
                     else if (diag.appState === 'CONNECTED' && diag.hasSynced === true && !diag.wwebjsReady) {
+                        this._evalTimeoutCount = 0;
                         this._connectedSyncedCount++;
                         this._pageErrorCount = 0;
                         logger.warn(this.accountName, `🔄 [AUTO-FIX] CONECTADO sem WWebJS (${this._connectedSyncedCount}x). Re-injetando...`);
@@ -679,6 +693,7 @@ class WhatsAppSession extends EventEmitter {
                     }
                     // CASO 4: WWebJS presente na página mas o Evento 'ready' nunca disparou no Node.js (Vítima de Navigation / Context Destroyed)
                     else if (diag.appState === 'CONNECTED' && diag.hasSynced === true && diag.wwebjsReady === true) {
+                        this._evalTimeoutCount = 0;
                         this._readyWaitCount = (this._readyWaitCount || 0) + 1;
                         if (this._readyWaitCount >= 4) { // 20 segundos travado esperando o ready
                             logger.warn(this.accountName, `🚨 [AUTO-FIX] Contexto JS travou durante o Inject (Navigation). Recarregando a página para destrancar a lib...`);
@@ -692,6 +707,7 @@ class WhatsAppSession extends EventEmitter {
                     }
                     // CASO 5: Qualquer outro estado → reset contadores
                     else {
+                        this._evalTimeoutCount = 0;
                         this._connectedSyncedCount = 0;
                         this._pageErrorCount = 0;
                         this._readyWaitCount = 0;
