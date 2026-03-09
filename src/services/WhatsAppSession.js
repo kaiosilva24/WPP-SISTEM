@@ -648,8 +648,8 @@ class WhatsAppSession extends EventEmitter {
                         logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está ocupado e bloqueando o Puppeteer (${this._evalTimeoutCount}x). Aguardando liberação...`);
                         this._pageErrorCount = 0;
 
-                        if (this._evalTimeoutCount >= 4) { // Puta deadlock da RAM da página
-                            logger.error(this.accountName, `🚨 [DIAG] Deadlock detectado! A página do WhatsApp congelou na VPS. Dando F5 (reload) forçado na aba...`);
+                        if (this._evalTimeoutCount >= 12) { // 2 minutos de deadlock da RAM da página
+                            logger.error(this.accountName, `🚨 [DIAG] Deadlock persistente detectado! A página do WhatsApp congelou na VPS. Dando F5 (reload) forçado na aba...`);
                             this._evalTimeoutCount = 0;
                             try {
                                 await this.client.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
