@@ -633,12 +633,33 @@ class WhatsAppSession extends EventEmitter {
             this._diagRunning = false;
 
             const runDiagnostic = async () => {
-                if (this._diagRunning) return; // Evita sobreposição
+                if (this._diagRunning) return; // Evita sobreposição simples
+                if (this._diagPending) {
+                    // Já existe uma Promessa Presa no Puppeteer
+                    this._evalTimeoutCount = (this._evalTimeoutCount || 0) + 1;
+                    logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está ocupado e bloqueando o Puppeteer (${this._evalTimeoutCount}x). Aguardando liberação...`);
+
+                    if (this._evalTimeoutCount >= 60) {
+                        logger.error(this.accountName, `🚨 [DIAG] Deadlock persistente detectado (5 mins)! A página do WhatsApp congelou na VPS. Dando F5 (reload) forçado na aba...`);
+                        this._evalTimeoutCount = 0;
+                        this._diagPending = false;
+                        try {
+                            await this.client.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+                            logger.info(this.accountName, `🔄 [DIAG] F5 executado com sucesso!`);
+                        } catch (e) {
+                            logger.error(this.accountName, `Erro ao dar F5 na aba travada: ${e.message}`);
+                        }
+                    }
+                    return;
+                }
+
                 if (this.status !== 'authenticated' || !this.client?.pupPage) {
                     if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
                     return;
                 }
+
                 this._diagRunning = true;
+                this._diagPending = true;
                 try {
                     const diag = await Promise.race([
                         this.client.pupPage.evaluate(() => {
@@ -650,6 +671,12 @@ class WhatsAppSession extends EventEmitter {
                         }).catch(() => ({ appState: 'PAGE_ERROR', hasSynced: '?', wwebjsReady: false })),
                         new Promise(resolve => setTimeout(() => resolve({ appState: 'EVAL_TIMEOUT', hasSynced: '?', wwebjsReady: false }), 10000))
                     ]);
+
+                    // Só tira a pendência se NÃO for EVAL_TIMEOUT falso 
+                    // (porque se deu timeout, a promise ali em cima evaluate ainda ta rodando no fundo)
+                    if (diag.appState !== 'EVAL_TIMEOUT') {
+                        this._diagPending = false;
+                    }
 
                     logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | hasSynced=${diag.hasSynced} | WWebJS=${diag.wwebjsReady}`);
 
