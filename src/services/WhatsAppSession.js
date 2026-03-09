@@ -271,6 +271,8 @@ class WhatsAppSession extends EventEmitter {
                         // '--single-process', // <-- REMOVIDO: Comprovado ser o causador do DEADLOCK do WhatsappWeb na Discloud (Trava de Thread Unica)
                         '--disable-backgrounding-occluded-windows', // Otimização extrema para Linux em Headless
                         '--disable-renderer-backgrounding',         // Impede o Chrome de congelar a injeção do JS por "estar em segundo plano"
+                        '--disable-ipc-flooding-protection',        // Impede a V8 de dropar mensagens grandes do IndexedDB pro Main Thread
+                        '--js-flags="--max-old-space-size=1024 --expose-gc"', // Libera mais RAM para o limite da aba isolada do V8
                         '--memory-pressure-off',
                         '--no-recovery-component',
                         '--disable-session-crashed-bubble',
