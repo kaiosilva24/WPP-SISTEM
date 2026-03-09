@@ -642,40 +642,22 @@ class WhatsAppSession extends EventEmitter {
 
                     logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | hasSynced=${diag.hasSynced} | WWebJS=${diag.wwebjsReady}`);
 
-                    // CASO 1: PAGE_ERROR/EVAL_TIMEOUT — página crashou ou inject bloqueando
-                    if (diag.appState === 'PAGE_ERROR' || diag.appState === 'ERRO' || diag.appState === 'EVAL_TIMEOUT') {
+                    // CASO 1: EVAL_TIMEOUT — página bloqueada, provável carregamento pesado
+                    if (diag.appState === 'EVAL_TIMEOUT') {
+                        logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está muito ocupado e bloqueando o Puppeteer. A injeção está demorando. Aguardando liberação de CPU...`);
+                        this._pageErrorCount = 0;
+                    }
+                    // CASO 2: PAGE_ERROR — página com certeza crashou internamente
+                    else if (diag.appState === 'PAGE_ERROR' || diag.appState === 'ERRO') {
                         this._pageErrorCount++;
-                        if (this._pageErrorCount >= 4) { // 20s confirmação (aumentado para suportar VPS lentas)
-                            const reason = diag.appState === 'EVAL_TIMEOUT' ? 'Inject travado (evaluate timeout)' : 'Página crashou';
-                            logger.error(this.accountName, `💀 [DIAG] ${reason} (${this._pageErrorCount}x). Recovery imediato!`);
-                            clearInterval(this._diagnosticInterval); this._diagnosticInterval = null;
-                            if (this._injectRecoveryTimeout) { clearTimeout(this._injectRecoveryTimeout); this._injectRecoveryTimeout = null; }
+                        if (this._pageErrorCount >= 4) { // 20s confirmação
+                            logger.error(this.accountName, `💀 [DIAG] Página crashou (${this._pageErrorCount}x). Recarregando a página pelo navegador para tentar recuperar...`);
                             this._pageErrorCount = 0;
-                            // Dispara recovery diretamente
-                            this._injectFailCount = (this._injectFailCount || 0) + 1;
-                            const db = require('../database/DatabaseManager');
-                            if (this._injectFailCount >= 5) {
-                                logger.warn(this.accountName, `❌ ${this._injectFailCount}ª falha consecutiva de falha de injeção ou crash de RAM.`);
-                                try {
-                                    await this.destroy(false);
-                                    await db.updateAccountStatus(this.accountId, 'disconnected');
-                                    logger.warn(this.accountName, `💡 Sessão preservada de forma segura! Reinicie a conta no painel para tentar novamente.`);
-                                    this._injectFailCount = 0;
-                                } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
-                            } else {
-                                logger.warn(this.accountName, `⚠️ 1ª falha. Preservando sessão e reconectando...`);
-                                try {
-                                    await this.destroy(false);
-                                    await db.updateAccountStatus(this.accountId, 'disconnected');
-                                    if (!this.intentionalStop) {
-                                        logger.info(this.accountName, `🔄 Reconectando em 5s...`);
-                                        setTimeout(() => this.reconnect(), 5000);
-                                    }
-                                } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
+                            try {
+                                await this.client.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+                            } catch (e) {
+                                logger.error(this.accountName, `Erro ao recarregar a aba crashada: ${e.message}`);
                             }
-                            this.emit('inject_timeout');
-                            this._diagRunning = false;
-                            return;
                         }
                     }
                     // CASO 2: CONNECTED + hasSynced mas WWebJS ausente → re-inject
@@ -742,7 +724,7 @@ class WhatsAppSession extends EventEmitter {
                             this._injectFailCount = 0;
                         } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
                     } else {
-                        logger.warn(this.accountName, `⚠️ Inject preso por 60s (tentativa ${this._injectFailCount}/2). Preservando sessão...`);
+                        logger.warn(this.accountName, `⚠️ Inject preso por 180s (tentativa ${this._injectFailCount}/5). Preservando sessão e recomeçando...`);
                         try {
                             await this.destroy(false);
                             await db.updateAccountStatus(this.accountId, 'disconnected');
@@ -754,7 +736,7 @@ class WhatsAppSession extends EventEmitter {
                     }
                     this.emit('inject_timeout');
                 }
-            }, 60000); // 60 segundos
+            }, 180000); // 180 segundos (3 minutos) tolerância máxima para carregamento em VPS gaga
         });
 
         // Pronto
