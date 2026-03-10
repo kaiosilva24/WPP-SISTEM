@@ -391,3 +391,146 @@ index f68491f..917c958 100644
      }
  }
  
+diff --git a/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js b/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js
+index a14106d..c7ca247 100644
+--- a/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js
++++ b/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js
+@@ -36,7 +36,7 @@ class RemoteAuth extends BaseAuthStrategy {
+         if (!backupSyncIntervalMs || backupSyncIntervalMs < 60000) {
+             throw new Error('Invalid backupSyncIntervalMs. Accepts values starting from 60000ms {1 minute}.');
+         }
+-        if(!store) throw new Error('Remote database store is required.');
++        if (!store) throw new Error('Remote database store is required.');
+ 
+         this.store = store;
+         this.clientId = clientId;
+@@ -84,16 +84,16 @@ class RemoteAuth extends BaseAuthStrategy {
+                 recursive: true,
+                 force: true,
+                 maxRetries: this.rmMaxRetries,
+-            }).catch(() => {});
++            }).catch(() => { });
+         }
+         clearInterval(this.backupSync);
+     }
+ 
+     async afterAuthReady() {
+-        const sessionExists = await this.store.sessionExists({session: this.sessionName});
+-        if(!sessionExists) {
++        const sessionExists = await this.store.sessionExists({ session: this.sessionName });
++        if (!sessionExists) {
+             await this.delay(60000); /* Initial delay sync required for session to be stable enough to recover */
+-            await this.storeRemoteSession({emit: true});
++            await this.storeRemoteSession({ emit: true });
+         }
+         var self = this;
+         this.backupSync = setInterval(async function () {
+@@ -106,30 +106,30 @@ class RemoteAuth extends BaseAuthStrategy {
+         const pathExists = await this.isValidPath(this.userDataDir);
+         if (pathExists) {
+             await this.compressSession();
+-            await this.store.save({session: path.join(this.dataPath, this.sessionName)});
++            await this.store.save({ session: path.join(this.dataPath, this.sessionName) });
+             await fs.promises.unlink(path.join(this.dataPath, `${this.sessionName}.zip`));
+             await fs.promises.rm(`${this.tempDir}`, {
+                 recursive: true,
+                 force: true,
+                 maxRetries: this.rmMaxRetries,
+-            }).catch(() => {});
+-            if(options && options.emit) this.client.emit(Events.REMOTE_SESSION_SAVED);
++            }).catch(() => { });
++            if (options && options.emit) this.client.emit(Events.REMOTE_SESSION_SAVED);
+         }
+     }
+ 
+     async extractRemoteSession() {
+         const pathExists = await this.isValidPath(this.userDataDir);
+         const compressedSessionPath = path.join(this.dataPath, `${this.sessionName}.zip`);
+-        const sessionExists = await this.store.sessionExists({session: this.sessionName});
++        const sessionExists = await this.store.sessionExists({ session: this.sessionName });
+         if (pathExists) {
+             await fs.promises.rm(this.userDataDir, {
+                 recursive: true,
+                 force: true,
+                 maxRetries: this.rmMaxRetries,
+-            }).catch(() => {});
++            }).catch(() => { });
+         }
+         if (sessionExists) {
+-            await this.store.extract({session: this.sessionName, path: compressedSessionPath});
++            await this.store.extract({ session: this.sessionName, path: compressedSessionPath });
+             await this.unCompressSession(compressedSessionPath);
+         } else {
+             fs.mkdirSync(this.userDataDir, { recursive: true });
+@@ -137,15 +137,15 @@ class RemoteAuth extends BaseAuthStrategy {
+     }
+ 
+     async deleteRemoteSession() {
+-        const sessionExists = await this.store.sessionExists({session: this.sessionName});
+-        if (sessionExists) await this.store.delete({session: this.sessionName});
++        const sessionExists = await this.store.sessionExists({ session: this.sessionName });
++        if (sessionExists) await this.store.delete({ session: this.sessionName });
+     }
+ 
+     async compressSession() {
+         const archive = archiver('zip');
+         const stream = fs.createWriteStream(path.join(this.dataPath, `${this.sessionName}.zip`));
+ 
+-        await fs.copy(this.userDataDir, this.tempDir).catch(() => {});
++        await fs.copy(this.userDataDir, this.tempDir).catch(() => { });
+         await this.deleteMetadata();
+         return new Promise((resolve, reject) => {
+             archive
+@@ -161,12 +161,21 @@ class RemoteAuth extends BaseAuthStrategy {
+     async unCompressSession(compressedSessionPath) {
+         var stream = fs.createReadStream(compressedSessionPath);
+         await new Promise((resolve, reject) => {
+-            stream.pipe(unzipper.Extract({
+-                path: this.userDataDir,
+-                concurrency: 10
+-            }))
+-                .on('error', err => reject(err))
+-                .on('finish', () => resolve());
++            const extractTimeout = setTimeout(() => {
++                reject(new Error("Timeout crítico ao descompactar sessão do WhatsApp (IO gargalo). Tente novamente."));
++            }, 120000);
++
++            try {
++                stream.pipe(unzipper.Extract({
++                    path: this.userDataDir,
++                    concurrency: 10
++                }))
++                    .on('error', err => { clearTimeout(extractTimeout); reject(err); })
++                    .on('finish', () => { clearTimeout(extractTimeout); resolve(); });
++            } catch (err) {
++                clearTimeout(extractTimeout);
++                reject(err);
++            }
+         });
+         await fs.promises.unlink(compressedSessionPath);
+     }
+@@ -185,9 +194,9 @@ class RemoteAuth extends BaseAuthStrategy {
+                             recursive: true,
+                             force: true,
+                             maxRetries: this.rmMaxRetries,
+-                        }).catch(() => {});
++                        }).catch(() => { });
+                     } else {
+-                        await fs.promises.unlink(dirElement).catch(() => {});
++                        await fs.promises.unlink(dirElement).catch(() => { });
+                     }
+                 }
+             }
+diff --git a/node_modules/whatsapp-web.js/src/structures/Channel.js b/node_modules/whatsapp-web.js/src/structures/Channel.js
+index f7ed110..34f2497 100644
+--- a/node_modules/whatsapp-web.js/src/structures/Channel.js
++++ b/node_modules/whatsapp-web.js/src/structures/Channel.js
+@@ -41,7 +41,7 @@ class Channel extends Base {
+          * The channel description
+          * @type {string}
+          */
+-        this.description = data.channelMetadata.description;
++        this.description = data.channelMetadata?.description;
+ 
+         /**
+          * Indicates if it is a Channel

@@ -335,16 +335,31 @@ class WhatsAppSession extends EventEmitter {
                 require('fs').writeFileSync(path.join(__dirname, '..', '..', 'error_launch.log'), `Error: ${errMsg}\nStack: ${error?.stack || 'N/A'}\nFull: ${JSON.stringify(error, Object.getOwnPropertyNames(error || {}), 2)}\n`);
             } catch (e) { /* ignore write errors */ }
 
-            // AUTO-CLEAR: Se auth timeout, a sessão no PostgreSQL está corrompida
-            // Limpa automaticamente para gerar QR novo na próxima tentativa
+            // Tratamento de Timeouts (Rede / Disco Local)
             const errStr = String(errMsg).toLowerCase();
             if (errStr.includes('auth timeout') || errStr.includes('auth_timeout')) {
                 logger.warn(this.accountName, `⚠️ Auth timeout. O WhatsApp Web demorou muito para autenticar (pode ser proxy lento).`);
                 logger.info(this.accountName, `💡 Sessão preservada no Banco de Dados para a próxima tentativa.`);
+            } else if (errStr.includes('timeout crítico') || errStr.includes('descompactar')) {
+                logger.warn(this.accountName, `⚠️ Falha ao extrair arquivos da sessão (Gargalo de Disco/CPU).`);
+                logger.info(this.accountName, `💡 Tentaremos novamente no próximo reinício sem apagar a sessão no banco.`);
             }
 
             this.status = 'error';
             this.isInitializing = false;
+
+            // PREVENÇÃO DE MEMORY LEAK (DISCLOUD ZOMBIE PROCESSES)
+            // Se o client falhar ao inicializar (e.g. timeout de página ou timeout no inject do WWebJS),
+            // a instância do Puppeteer ficaria aberta para sempre consumindo ~200MB de RAM.
+            try {
+                if (this.client) {
+                    logger.warn(this.accountName, `🧹 Fechando aba do navegador Chromium corrompida para liberar RAM...`);
+                    await this.client.destroy();
+                }
+            } catch (destroyErr) {
+                logger.error(this.accountName, `Falha ao tentar destruir cliente corrompido: ${destroyErr.message}`);
+            }
+
             this.emit('error', error);
             throw error;
         }
