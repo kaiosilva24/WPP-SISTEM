@@ -99,8 +99,20 @@ class SessionManager extends EventEmitter {
 
             this.sessions.set(accountId, session);
 
-            // Inicializa a sessão
-            await session.initialize();
+            // FILA GLOBAL DE INICIALIZAÇÃO (DISCLOUD PID LIMIT FIX)
+            // Impede que 20 contas abram Chromium exatamente no mesmo segundo e estourem o limite (EAGAIN 11)
+            const prevInit = this.globalInitLock || Promise.resolve();
+            let releaseGlobal;
+            this.globalInitLock = new Promise(resolve => { releaseGlobal = resolve; });
+
+            await prevInit.catch(() => { }); // Espera a anterior
+            try {
+                // Inicializa a sessão com exclusividade de boot na CPU
+                logger.info(null, `[Fila Global] Iniciando boot do navegador para a conta ${accountName}...`);
+                await session.initialize();
+            } finally {
+                releaseGlobal();
+            }
 
             return session;
 

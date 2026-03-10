@@ -288,11 +288,22 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-web-security',                   // Reduz verificações de CORS locais
                         '--disable-site-isolation-trials',          // Desativa isolamento de RAM estrito por site
                         '--disable-gpu',
-                        '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways',
+                        '--disable-software-rasterizer',
+                        '--disable-background-networking',
+                        '--disable-default-apps',
+                        '--disable-sync',
+                        '--disable-translate',
+                        '--metrics-recording-only',
+                        '--mute-audio',
+                        '--no-default-browser-check',
+                        '--no-experiments',
+                        '--safebrowsing-disable-auto-update',
+                        '--renderer-process-limit=1',               // Força 1 único processo de renderização
+                        '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways,AudioServiceOutOfProcess',
 
                         // RemoteAuth gerencia o --user-data-dir internamente
 
-                        // === CORREÇÃO DO VAZAMENTO WEBRTC (CRÍTICO!) ===
+                        // === CORREÇÃO DO VAZAMENTO WEBRTC E PIDs (CRÍTICOS!) ===
                         '--disable-webrtc',
                         '--disable-webrtc-hw-decoding',
                         '--disable-webrtc-hw-encoding',
