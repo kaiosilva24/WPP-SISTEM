@@ -556,10 +556,12 @@ router.post('/:id/start', async (req, res) => {
 
         // Usa o SchedulerManager para ativação segura (verifica Proxies conflitantes antes)
         console.log(`[API] Solicitando inicialização via SchedulerManager para conta ${account.id}`);
-        await schedulerManager.activateAccount(account);
+        schedulerManager.activateAccount(account).catch(err => {
+            console.error(`[API] Erro na ativação assíncrona da conta ${account.id}:`, err);
+        });
         console.log(`[API] Comando de Sessão enviado para conta ${account.id}`);
 
-        res.json({ message: 'Sessão iniciada/agendada' });
+        res.json({ message: 'Sessão iniciada. O navegador irá bootar em background.' });
     } catch (error) {
         console.error(`[API] Erro ao iniciar sessão:`, error);
         res.status(500).json({ error: error.message });
@@ -697,8 +699,8 @@ router.post('/:id/restart', async (req, res) => {
         const session = sessionManager.getSession(req.params.id);
         if (session) {
             console.log(`[API] Reiniciando sessão existente para conta ${req.params.id}`);
-            await session.reconnect();
-            res.json({ message: 'Sessão reiniciada' });
+            session.reconnect().catch(e => console.error(`[API] Erro ao reiniciar conta ${req.params.id}:`, e));
+            res.json({ message: 'Comando de reinício enviado para background' });
         } else {
             // Se não existe sessão, cria uma nova
             console.log(`[API] Sessão não encontrada para reiniciar (conta ${req.params.id}), criando nova...`);
@@ -706,8 +708,10 @@ router.post('/:id/restart', async (req, res) => {
             if (!account) {
                 return res.status(404).json({ error: 'Conta não encontrada' });
             }
-            await sessionManager.createSession(account.id, account.name, { visible: true }); // Restart geralmente implica querer ver o que houve
-            res.json({ message: 'Sessão iniciada' });
+            sessionManager.createSession(account.id, account.name, { visible: true }).catch(e => 
+                console.error(`[API] Erro ao criar conta ${req.params.id} via restart:`, e)
+            );
+            res.json({ message: 'Comando de Inicialização enviado para background' });
         }
     } catch (error) {
         res.status(500).json({ error: error.message });

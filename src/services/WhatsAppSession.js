@@ -1,4 +1,4 @@
-﻿const { Client, RemoteAuth } = require('whatsapp-web.js');
+const { Client, RemoteAuth } = require('whatsapp-web.js');
 const path = require('path');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const proxyChain = require('proxy-chain');
@@ -178,10 +178,10 @@ class WhatsAppSession extends EventEmitter {
     }
 
     /**
-     * Inicializa a sessão
+     * Inicializa a sessão com mecanismo nativo de Retry (Tolerância a Proxy Drops)
      */
-    async initialize() {
-        if (this.isInitializing) {
+    async initialize(retryCount = 0) {
+        if (this.isInitializing && retryCount === 0) {
             logger.warn(this.accountName, `Sessão já está inicializando! Bloqueando chamada simultânea.`);
             return;
         }
@@ -189,6 +189,9 @@ class WhatsAppSession extends EventEmitter {
         try {
             this.isInitializing = true;
             this.status = 'initializing';
+            if (retryCount > 0) {
+                logger.info(this.accountName, `🔄 Re-tentativa de Inicialização interna (${retryCount}/2)...`);
+            }
 
             // 1. Validação do Proxy (Obrigatória se habilitado)
             if (this.config.proxy_enabled) {
@@ -341,13 +344,45 @@ class WhatsAppSession extends EventEmitter {
 
         } catch (error) {
             const errMsg = error?.message || error?.toString?.() || JSON.stringify(error) || 'Erro desconhecido';
+            const errStr = String(errMsg).toLowerCase();
+
+            // PREVENÇÃO DE MEMORY LEAK (DISCLOUD ZOMBIE PROCESSES) ANTES DO RETRY
+            try {
+                if (this.client) {
+                    logger.warn(this.accountName, `🧹 Fechando aba do navegador Chromium corrompida para liberar RAM...`);
+                    await this.client.destroy();
+                }
+            } catch (destroyErr) {
+                logger.error(this.accountName, `Falha ao tentar destruir cliente corrompido: ${destroyErr.message}`);
+            }
+
+            // LIMPEZA DO PROXY ANÔNIMO ZUMBIE
+            if (this.anonymizedProxyUrl) {
+                const proxyChain = require('proxy-chain');
+                proxyChain.closeAnonymizedProxy(this.anonymizedProxyUrl, true).catch(() => { });
+                this.anonymizedProxyUrl = null;
+            }
+
+            // RETRY AUTOMÁTICO SE FOR ERRO PASSAGEIRO DE REDE/CRACH
+            const isTransientError = errStr.includes('execution context was destroyed') || 
+                                     errStr.includes('targetcloseerror') || 
+                                     errStr.includes('navigation timeout');
+            
+            if (isTransientError && retryCount < 2) {
+                logger.warn(this.accountName, `⚠️ Erro de rede/Chromium contornável: ${errMsg}.`);
+                logger.info(this.accountName, `🔄 Tentando auto-recuperação (Tentativa ${retryCount + 1}/2) em 5s...`);
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                // Reseta a flag para permitir nova inicialização
+                this.isInitializing = false;
+                return this.initialize(retryCount + 1);
+            }
+
             logger.error(this.accountName, `Erro fatal na inicialização: ${errMsg}`);
             try {
                 require('fs').writeFileSync(path.join(__dirname, '..', '..', 'error_launch.log'), `Error: ${errMsg}\nStack: ${error?.stack || 'N/A'}\nFull: ${JSON.stringify(error, Object.getOwnPropertyNames(error || {}), 2)}\n`);
             } catch (e) { /* ignore write errors */ }
 
             // Tratamento de Timeouts (Rede / Disco Local)
-            const errStr = String(errMsg).toLowerCase();
             if (errStr.includes('auth timeout') || errStr.includes('auth_timeout')) {
                 logger.warn(this.accountName, `⚠️ Auth timeout. O WhatsApp Web demorou muito para autenticar (pode ser proxy lento).`);
                 logger.info(this.accountName, `💡 Sessão preservada no Banco de Dados para a próxima tentativa.`);
@@ -358,18 +393,6 @@ class WhatsAppSession extends EventEmitter {
 
             this.status = 'error';
             this.isInitializing = false;
-
-            // PREVENÇÃO DE MEMORY LEAK (DISCLOUD ZOMBIE PROCESSES)
-            // Se o client falhar ao inicializar (e.g. timeout de página ou timeout no inject do WWebJS),
-            // a instância do Puppeteer ficaria aberta para sempre consumindo ~200MB de RAM.
-            try {
-                if (this.client) {
-                    logger.warn(this.accountName, `🧹 Fechando aba do navegador Chromium corrompida para liberar RAM...`);
-                    await this.client.destroy();
-                }
-            } catch (destroyErr) {
-                logger.error(this.accountName, `Falha ao tentar destruir cliente corrompido: ${destroyErr.message}`);
-            }
 
             this.emit('error', error);
             throw error;
