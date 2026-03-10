@@ -745,16 +745,9 @@ class WhatsAppSession extends EventEmitter {
                         logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está ocupado e bloqueando o Puppeteer (${this._evalTimeoutCount}x). Aguardando liberação...`);
                         this._pageErrorCount = 0;
 
-                        if (this._evalTimeoutCount >= 60) { // 5 minutos de espera para carregamento extremo na Discloud
-                            logger.error(this.accountName, `🚨 [DIAG] Deadlock persistente detectado (5 mins)! A página do WhatsApp congelou na VPS. Dando F5 (reload) forçado na aba...`);
-                            this._evalTimeoutCount = 0;
-                            try {
-                                await this.client.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-                                logger.info(this.accountName, `🔄 [DIAG] F5 executado com sucesso!`);
-                            } catch (e) {
-                                logger.error(this.accountName, `Erro ao dar F5 na aba travada: ${e.message}`);
-                            }
-                        }
+                        // NOTA WPP-SISTEM: 
+                        // A recuperação pesada (F5 ou timeout fatal) agora é responsabilidade 
+                        // integral e exclusiva do loop de injeção resiliente dentro do Client.js (whatsapp-web.js)
                     }
                     // CASO 2: PAGE_ERROR — página com certeza crashou internamente
                     else if (diag.appState === 'PAGE_ERROR' || diag.appState === 'ERRO') {
