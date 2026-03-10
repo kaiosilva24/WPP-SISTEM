@@ -592,10 +592,17 @@ class WhatsAppSession extends EventEmitter {
                         await new Promise(r => setTimeout(r, 5000));
                     }
 
+                    // Força corte brusco após 15s (O timeout do axios não encerra conexões TCP presas no CONNECT)
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
                     const response = await axios.get('https://api.ipify.org?format=json', {
                         httpsAgent: agent,
-                        timeout: 15000
+                        timeout: 15000,
+                        signal: controller.signal
                     });
+
+                    clearTimeout(timeoutId);
 
                     if (response.data && response.data.ip) {
                         this.publicIP = response.data.ip;
