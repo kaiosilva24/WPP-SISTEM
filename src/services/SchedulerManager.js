@@ -197,7 +197,12 @@ class SchedulerManager {
                     } catch (e) {
                         logger.error('Scheduler', `[${name}] Erro ao emitir evento account:initializing: ${e.message}`);
                     }
-                    session.initialize();
+                    
+                    // (WPP-SISTEM FIX): Catch na chamada assíncrona solta para impedir 
+                    // Unhandled Promise Rejection do Node.js quando o Proxy cai.
+                    session.initialize().catch(err => {
+                        logger.error('Scheduler', `[${name}] Erro pego pelo Catch do initialize(): ${err.message}`);
+                    });
                 } else if (session.isPaused || session.status === 'paused') {
                     // Sessão está viva, apenas com o proxy/rede pausado
                     session.resume();
