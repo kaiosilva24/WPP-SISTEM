@@ -586,10 +586,10 @@ index f7ed110..34f2497 100644
          /**
           * Indicates if it is a Channel
 diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-index 4fdc45d..c537fb7 100644
+index 4fdc45d..0dca09b 100644
 --- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
 +++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-@@ -12,12 +12,23 @@ exports.LoadUtils = () => {
+@@ -12,12 +12,29 @@ exports.LoadUtils = () => {
      window.WWebJS.sendSeen = async (chatId) => {
          const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
          if (chat) {
@@ -607,8 +607,14 @@ index 4fdc45d..c537fb7 100644
              await window.Store.SendSeen.sendSeen({
                  chat: chat,
                  threadId: undefined
-             });         
+             });
 -            window.Store.WAWebStreamModel.Stream.markUnavailable();
++            try {
++                if (window.Store.Cmd && window.Store.Cmd.markChatUnread) {
++                    await window.Store.Cmd.markChatUnread(chat, false);
++                }
++                if (chat.unreadCount) chat.unreadCount = 0;
++            } catch(e) {}         
 +            if (window.Store.WAWebStreamModel && window.Store.WAWebStreamModel.Stream) {
 +                window.Store.WAWebStreamModel.Stream.markUnavailable();
 +            }
