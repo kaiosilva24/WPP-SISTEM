@@ -281,7 +281,7 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-backgrounding-occluded-windows', 
                         '--disable-renderer-backgrounding',         
                         '--disable-ipc-flooding-protection',        
-                        '--js-flags="--max-old-space-size=1024 --expose-gc"', // Memória V8
+                        '--js-flags="--max-old-space-size=2048"', // Libera mais Memória V8 (2GB limite seguro em server 4GB)
                         '--memory-pressure-off',
                         '--no-recovery-component',
                         '--disable-session-crashed-bubble',
@@ -718,12 +718,15 @@ class WhatsAppSession extends EventEmitter {
                 if (this._diagPending) {
                     // Já existe uma Promessa Presa no Puppeteer
                     this._evalTimeoutCount = (this._evalTimeoutCount || 0) + 1;
-                    logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está ocupado e bloqueando o Puppeteer (${this._evalTimeoutCount}x). Aguardando liberação...`);
+                    
+                    if (this._evalTimeoutCount % 2 === 0) { // Log somente a cada 10 segundos
+                         logger.info(this.accountName, `⏳ [STARTUP] Sincronizando mensagens iniciais do WhatsApp com o banco local... (Aguarde)`);
+                    }
 
                     if (this._evalTimeoutCount >= 30) { 
                         // 30 x 5s = 150s no limite máximo global, o fallback principal cuidará de derrubar a sessão inteira se necessário.
                         // APENAS LOG. NÃO RECARREGUE! O WWebJS perde os eventos se a página for reiniciada depois de Autenticada.
-                        logger.error(this.accountName, `🚨 [DIAG] Deadlock extremamente longo (150s). O carregamento IndexedDB está monopolizando a Single Thread do Chromium.`);
+                        logger.warn(this.accountName, `🚨 Sincronização demorando mais que 2.5 minutos. A sessão irá abortar e tentar reconectar pelo motor de segurança.`);
                         this._evalTimeoutCount = 0;
                         this._diagPending = false;
                     }
@@ -760,7 +763,10 @@ class WhatsAppSession extends EventEmitter {
                     // CASO 1: EVAL_TIMEOUT — página bloqueada, provável carregamento pesado
                     if (diag.appState === 'EVAL_TIMEOUT') {
                         this._evalTimeoutCount = (this._evalTimeoutCount || 0) + 1;
-                        logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está ocupado e bloqueando o Puppeteer (${this._evalTimeoutCount}x). Aguardando liberação...`);
+                        // Silencia o warn caso 1 de carregamento, loga apenas em progressos
+                        if (this._evalTimeoutCount % 3 === 0) {
+                            logger.info(this.accountName, `⏳ O navegador (Chromium) iniciou a sincronização principal e aplicação dos hooks do WhatsApp... `);
+                        }
                         this._pageErrorCount = 0;
 
                         // NOTA WPP-SISTEM: 
