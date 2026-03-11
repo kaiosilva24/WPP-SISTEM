@@ -277,19 +277,19 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-accelerated-2d-canvas',
                         '--no-first-run',
                         '--no-zygote',
-                        // '--single-process', // <-- REMOVIDO: Comprovado ser o causador do DEADLOCK do WhatsappWeb na Discloud (Trava de Thread Unica)
-                        '--disable-backgrounding-occluded-windows', // Otimização extrema para Linux em Headless
-                        '--disable-renderer-backgrounding',         // Impede o Chrome de congelar a injeção do JS por "estar em segundo plano"
-                        '--disable-ipc-flooding-protection',        // Impede a V8 de dropar mensagens grandes do IndexedDB pro Main Thread
-                        '--js-flags="--max-old-space-size=1024 --expose-gc"', // Libera mais RAM para o limite da aba isolada do V8
+                        // '--single-process', // <-- REMOVIDO: Causa DEADLOCKs no WhatsappWeb na Discloud (Thread única)
+                        '--disable-backgrounding-occluded-windows', 
+                        '--disable-renderer-backgrounding',         
+                        '--disable-ipc-flooding-protection',        
+                        '--js-flags="--max-old-space-size=1024 --expose-gc"', // Memória V8
                         '--memory-pressure-off',
                         '--no-recovery-component',
                         '--disable-session-crashed-bubble',
                         '--disable-background-timer-throttling',
-                        '--disable-hang-monitor',                   // Impede o Chrome de fechar a aba se o DB ler muito devagar
+                        '--disable-hang-monitor',                   
                         '--disable-prompt-on-repost',
-                        '--disable-web-security',                   // Reduz verificações de CORS locais
-                        '--disable-site-isolation-trials',          // Desativa isolamento de RAM estrito por site
+                        '--disable-web-security',                   
+                        '--disable-site-isolation-trials',          
                         '--disable-gpu',
                         '--disable-software-rasterizer',
                         '--disable-background-networking',
@@ -301,8 +301,7 @@ class WhatsAppSession extends EventEmitter {
                         '--no-default-browser-check',
                         '--no-experiments',
                         '--safebrowsing-disable-auto-update',
-                        '--renderer-process-limit=1',               // Força 1 único processo de renderização
-                        '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways,AudioServiceOutOfProcess',
+                        '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways,AudioServiceOutOfProcess,TranslateUI,BlinkGenPropertyTrees',
 
                         // RemoteAuth gerencia o --user-data-dir internamente
 
@@ -721,12 +720,12 @@ class WhatsAppSession extends EventEmitter {
                     this._evalTimeoutCount = (this._evalTimeoutCount || 0) + 1;
                     logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está ocupado e bloqueando o Puppeteer (${this._evalTimeoutCount}x). Aguardando liberação...`);
 
-                    if (this._evalTimeoutCount >= 60) {
-                        logger.error(this.accountName, `🚨 [DIAG] Deadlock persistente detectado (5 mins)! A página do WhatsApp congelou na VPS. Dando F5 (reload) forçado na aba...`);
+                    if (this._evalTimeoutCount >= 12) { // 12 x 5s = 60s
+                        logger.error(this.accountName, `🚨 [DIAG] Deadlock persistente detectado (60s)! A página do WhatsApp congelou na VPS. Dando F5 (reload) forçado na aba...`);
                         this._evalTimeoutCount = 0;
                         this._diagPending = false;
                         try {
-                            await this.client.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+                            await this.client.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
                             logger.info(this.accountName, `🔄 [DIAG] F5 executado com sucesso!`);
                         } catch (e) {
                             logger.error(this.accountName, `Erro ao dar F5 na aba travada: ${e.message}`);
@@ -845,7 +844,7 @@ class WhatsAppSession extends EventEmitter {
                     const db = require('../database/DatabaseManager');
 
                     if (this._injectFailCount >= 5) {
-                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x por gargalo extremo (delay > 360s) ou falha grave.`);
+                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x por gargalo extremo (delay > 150s) ou falha grave.`);
                         try {
                             await this.destroy(false);
                             logger.warn(this.accountName, `💡 Sessão preservada! Tentaremos recomeçar a conexão do zero, inicie a conta no painel.`);
@@ -853,7 +852,7 @@ class WhatsAppSession extends EventEmitter {
                             this._injectFailCount = 0;
                         } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
                     } else {
-                        logger.warn(this.accountName, `⚠️ Inject preso por 360s (tentativa ${this._injectFailCount}/5). Preservando sessão e recomeçando...`);
+                        logger.warn(this.accountName, `⚠️ Inject preso por 150s (tentativa ${this._injectFailCount}/5). Preservando sessão e recomeçando...`);
                         try {
                             await this.destroy(false);
                             await db.updateAccountStatus(this.accountId, 'disconnected');
@@ -865,7 +864,7 @@ class WhatsAppSession extends EventEmitter {
                     }
                     this.emit('inject_timeout');
                 }
-            }, 360000); // 360 segundos (6 minutos) tolerância máxima para VPS super lentas
+            }, 150000); // 150 segundos de tolerância máxima para VPS super lentas
         });
 
         // Pronto
