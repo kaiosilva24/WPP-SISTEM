@@ -720,16 +720,12 @@ class WhatsAppSession extends EventEmitter {
                     this._evalTimeoutCount = (this._evalTimeoutCount || 0) + 1;
                     logger.warn(this.accountName, `⏳ [DIAG] O WhatsApp Web está ocupado e bloqueando o Puppeteer (${this._evalTimeoutCount}x). Aguardando liberação...`);
 
-                    if (this._evalTimeoutCount >= 12) { // 12 x 5s = 60s
-                        logger.error(this.accountName, `🚨 [DIAG] Deadlock persistente detectado (60s)! A página do WhatsApp congelou na VPS. Dando F5 (reload) forçado na aba...`);
+                    if (this._evalTimeoutCount >= 30) { 
+                        // 30 x 5s = 150s no limite máximo global, o fallback principal cuidará de derrubar a sessão inteira se necessário.
+                        // APENAS LOG. NÃO RECARREGUE! O WWebJS perde os eventos se a página for reiniciada depois de Autenticada.
+                        logger.error(this.accountName, `🚨 [DIAG] Deadlock extremamente longo (150s). O carregamento IndexedDB está monopolizando a Single Thread do Chromium.`);
                         this._evalTimeoutCount = 0;
                         this._diagPending = false;
-                        try {
-                            await this.client.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
-                            logger.info(this.accountName, `🔄 [DIAG] F5 executado com sucesso!`);
-                        } catch (e) {
-                            logger.error(this.accountName, `Erro ao dar F5 na aba travada: ${e.message}`);
-                        }
                     }
                     return;
                 }
