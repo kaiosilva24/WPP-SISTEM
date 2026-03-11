@@ -2607,7 +2607,16 @@ function App() {
                                                 {/* Scroll Area */}
                                                 <div
                                                     style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', fontFamily: "'Courier New', monospace", fontSize: '0.78rem', lineHeight: '1.6' }}
-                                                    ref={el => { if (el) el.scrollTop = el.scrollHeight; }}
+                                                    onScroll={(e) => {
+                                                        const el = e.target;
+                                                        const isAtBottom = el.scrollHeight - el.clientHeight - el.scrollTop < 50;
+                                                        el.dataset.autoScroll = isAtBottom ? 'true' : 'false';
+                                                    }}
+                                                    ref={el => { 
+                                                        if (el && el.dataset.autoScroll !== 'false') {
+                                                            el.scrollTop = el.scrollHeight; 
+                                                        } 
+                                                    }}
                                                 >
                                                     {logs.length === 0 ? (
                                                         <div style={{ color: '#555', textAlign: 'center', marginTop: '40px' }}>
