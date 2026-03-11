@@ -281,7 +281,7 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-backgrounding-occluded-windows', 
                         '--disable-renderer-backgrounding',         
                         '--disable-ipc-flooding-protection',        
-                        '--js-flags="--max-old-space-size=2048"', // Libera mais Memória V8 (2GB limite seguro em server 4GB)
+                        '--js-flags="--max-old-space-size=1024 --expose-gc"', // Memória V8
                         '--memory-pressure-off',
                         '--no-recovery-component',
                         '--disable-session-crashed-bubble',
@@ -712,6 +712,8 @@ class WhatsAppSession extends EventEmitter {
             this._connectedSyncedCount = 0;
             this._pageErrorCount = 0;
             this._diagRunning = false;
+            this._diagPending = false;
+            this._evalTimeoutCount = 0; // Previne vazamento de state da sessão anterior
 
             const runDiagnostic = async () => {
                 if (this._diagRunning) return; // Evita sobreposição simples
