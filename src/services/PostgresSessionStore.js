@@ -93,6 +93,12 @@ class PostgresSessionStore {
                 [options.session]
             );
             if (res.rows.length > 0) {
+                // Garante que o diretório pai da extração exista no disco efêmero do Discloud
+                const dir = path.dirname(options.path);
+                if (!fs.existsSync(dir)) {
+                    fs.mkdirSync(dir, { recursive: true });
+                }
+                
                 fs.writeFileSync(options.path, res.rows[0].session_data);
                 const sizeMB = (res.rows[0].session_data.length / 1024 / 1024).toFixed(2);
                 console.log(`[PostgresStore] Sessão '${options.session}' restaurada do PostgreSQL (${sizeMB} MB)`);
