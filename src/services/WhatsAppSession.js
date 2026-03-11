@@ -728,7 +728,7 @@ class WhatsAppSession extends EventEmitter {
                     if (this._evalTimeoutCount >= 180) { 
                         // 180 x 5s = 900s no limite máximo global de espera da engine do Chromium.
                         // APENAS LOG. NÃO RECARREGUE! O WWebJS perde os eventos se a página for reiniciada depois de Autenticada.
-                        logger.warn(this.accountName, `🚨 Sincronização demorando mais que 15 minutos. A sessão irá abortar e tentar reconectar pelo motor de segurança.`);
+                        logger.warn(this.accountName, `🚨 Sincronização demorando mais que 15 minutos na página (Descriptografando Banco Oculto). Aguarde mais um pouco.`);
                         this._evalTimeoutCount = 0;
                         this._diagPending = false;
                     }
@@ -751,7 +751,7 @@ class WhatsAppSession extends EventEmitter {
                             try { result.wwebjsReady = !!(window.WWebJS && window.WWebJS.sendMessage); } catch (e) { result.wwebjsReady = false; }
                             return result;
                         }).catch(() => ({ appState: 'PAGE_ERROR', hasSynced: '?', wwebjsReady: false })),
-                        new Promise(resolve => setTimeout(() => resolve({ appState: 'EVAL_TIMEOUT', hasSynced: '?', wwebjsReady: false }), 10000))
+                        new Promise(resolve => setTimeout(() => resolve({ appState: 'EVAL_TIMEOUT', hasSynced: '?', wwebjsReady: false }), 45000))
                     ]);
 
                     // Só tira a pendência se NÃO for EVAL_TIMEOUT falso 
@@ -1444,7 +1444,7 @@ class WhatsAppSession extends EventEmitter {
      * Pausa/Congela as interações temporariamente e Saca a conexão WAN (Proxy liberação)
      */
     async pause() {
-        if (this.status !== 'ready') return false;
+        if (!this.client && this.status === 'disconnected') return false;
 
         try {
             // Emula perda de sinal / Modo Avião cortando a rede do Puppeteer
@@ -1477,7 +1477,7 @@ class WhatsAppSession extends EventEmitter {
      * Retoma as interações e devolve a conexão de Rede (WAN)
      */
     async resume() {
-        if (this.status !== 'paused') return false;
+        if (!this.isPaused) return false;
 
         try {
             // Devolve o sinal de rede / Desativa Modo Avião
