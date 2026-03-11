@@ -725,10 +725,10 @@ class WhatsAppSession extends EventEmitter {
                          logger.info(this.accountName, `⏳ [STARTUP] Sincronizando mensagens iniciais do WhatsApp com o banco local... (Aguarde)`);
                     }
 
-                    if (this._evalTimeoutCount >= 60) { 
-                        // 60 x 5s = 300s no limite máximo global, o fallback principal cuidará de derrubar a sessão inteira se necessário.
+                    if (this._evalTimeoutCount >= 180) { 
+                        // 180 x 5s = 900s no limite máximo global de espera da engine do Chromium.
                         // APENAS LOG. NÃO RECARREGUE! O WWebJS perde os eventos se a página for reiniciada depois de Autenticada.
-                        logger.warn(this.accountName, `🚨 Sincronização demorando mais que 5 minutos. A sessão irá abortar e tentar reconectar pelo motor de segurança.`);
+                        logger.warn(this.accountName, `🚨 Sincronização demorando mais que 15 minutos. A sessão irá abortar e tentar reconectar pelo motor de segurança.`);
                         this._evalTimeoutCount = 0;
                         this._diagPending = false;
                     }
@@ -848,7 +848,7 @@ class WhatsAppSession extends EventEmitter {
                     const db = require('../database/DatabaseManager');
 
                     if (this._injectFailCount >= 5) {
-                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x por gargalo extremo (delay > 300s) ou falha grave.`);
+                        logger.warn(this.accountName, `⚠️ Inject falhou ${this._injectFailCount}x por gargalo extremo (delay > 900s) ou falha grave.`);
                         try {
                             await this.destroy(false);
                             logger.warn(this.accountName, `💡 Sessão preservada! Tentaremos recomeçar a conexão do zero, inicie a conta no painel.`);
@@ -856,7 +856,7 @@ class WhatsAppSession extends EventEmitter {
                             this._injectFailCount = 0;
                         } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
                     } else {
-                        logger.warn(this.accountName, `⚠️ Inject preso por 300s (tentativa ${this._injectFailCount}/5). Preservando sessão e recomeçando...`);
+                        logger.warn(this.accountName, `⚠️ Inject preso por 15min (tentativa ${this._injectFailCount}/5). Preservando sessão e recomeçando...`);
                         try {
                             await this.destroy(false);
                             await db.updateAccountStatus(this.accountId, 'disconnected');
@@ -868,7 +868,7 @@ class WhatsAppSession extends EventEmitter {
                     }
                     this.emit('inject_timeout');
                 }
-            }, 300000); // 300 segundos de tolerância máxima para VPS super lentas (criação de indexedDB via RemoteAuth)
+            }, 900000); // 15 minutos de tolerância máxima para VPS super lentas (criação de indexedDB via RemoteAuth)
         });
 
         // Pronto
