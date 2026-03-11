@@ -4,7 +4,8 @@ const path = require('path');
 const os = require('os');
 const db = require('../database/DatabaseManager');
 const logger = require('../utils/logger');
-const { delay, getHumanBehaviorSequence, simulateTyping, formatDelay } = require('../utils/humanBehavior');
+const humanBehavior = require('../utils/humanBehavior');
+const { delay, getHumanBehaviorSequence, simulateTyping, simulateRecording, formatDelay } = humanBehavior;
 const { getFirstResponse, getFollowUpResponse, getGroupGreeting } = require('../utils/messageTemplates');
 const { parseSpintax } = require('../utils/spintax');
 
@@ -882,7 +883,7 @@ class MessageHandler {
             if (!willSendMedia) {
                 logger.info(session.accountName, `⌨️ [${typStep}/${totalSteps}] Delay de digitação: ${typingDelaySec}s (simulando digitando...)`);
                 try {
-                    await humanBehavior.simulateTyping(session, contactId, behavior.typingDelay);
+                    await simulateTyping(session, contactId, behavior.typingDelay);
                     logger.info(session.accountName, `✏️ Fim da digitação`);
                 } catch (typingErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao simular digitação (ignorado): ${typingErr.message}`);
@@ -1067,7 +1068,7 @@ class MessageHandler {
                 const recDelaySec = (recordingDelay / 1000).toFixed(1);
                 logger.info(session.accountName, `🎤 Simulando gravação de áudio: ${recDelaySec}s (aparecendo foto de perfil gravando...)`);
                 try {
-                    await humanBehavior.simulateRecording(session, contactId, recordingDelay);
+                    await simulateRecording(session, contactId, recordingDelay);
                 } catch (recErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao simular gravação (ignorado): ${recErr.message}`);
                 }
@@ -1340,7 +1341,7 @@ class MessageHandler {
                             await delay(Math.floor(Math.random() * 2000) + 2000); // Aguarda de 2 a 4s com chat aberto simulando ler
 
                             logger.info(session.accountName, `⌨️ [2/3] Digitando mensagem para ${target.accountName}: ${(typingTime / 1000).toFixed(1)}s`);
-                            await simulateTyping(targetChat, typingTime);
+                            await simulateTyping(session, targetPhone, typingTime);
                         } catch (e) {
                             // Ignorar silenciosamente erro de Detached Frame do WWebJS
                             // logger.warn(session.accountName, `Falha ignorada na simulação visual (Auto-warm): ${e.message}`);
