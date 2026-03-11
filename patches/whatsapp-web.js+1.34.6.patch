@@ -1,5 +1,5 @@
 diff --git a/node_modules/whatsapp-web.js/src/Client.js b/node_modules/whatsapp-web.js/src/Client.js
-index f68491f..8da2ab5 100644
+index f68491f..bfa9da4 100644
 --- a/node_modules/whatsapp-web.js/src/Client.js
 +++ b/node_modules/whatsapp-web.js/src/Client.js
 @@ -17,7 +17,7 @@ const ContactFactory = require('./factories/ContactFactory');
@@ -52,48 +52,41 @@ index f68491f..8da2ab5 100644
                  /**
                   * Emitted when there has been an error while trying to restore an existing session
                   * @event Client#auth_failure
-@@ -241,14 +241,44 @@ class Client extends EventEmitter {
+@@ -232,7 +232,14 @@ class Client extends EventEmitter {
+                 }
+ 
+                 if (isCometOrAbove) {
+-                    await this.pupPage.evaluate(ExposeStore);
++                    try {
++                        await Promise.race([
++                            this.pupPage.evaluate(ExposeStore),
++                            new Promise((_, reject) => setTimeout(() => reject(new Error('ExposeStore injection timeout (WPP-SISTEM)')), 300000))
++                        ]);
++                    } catch (exposeErr) {
++                        console.log(`[WWebJS-Core] ExposeStore falhou/timeout, prosseguindo para poll de segurança: ${exposeErr.message}`);
++                    }
+                 } else {
+                     // make sure all modules are ready before injection
+                     // 2 second delay after authentication makes sense and does not need to be made dyanmic or removed
+@@ -241,14 +248,22 @@ class Client extends EventEmitter {
                  }
                  let start = Date.now();
                  let res = false;
 -                while(start > (Date.now() - 30000)){
--                    // Check window.Store Injection
++                let reloadAttempted = false;
++
++                while (start > (Date.now() - 300000)) { // 300 segundos totais limite máximo tolerado pelo VPS
+                     // Check window.Store Injection
 -                    res = await this.pupPage.evaluate('window.Store != undefined');
 -                    if(res){break;}
 -                    await new Promise(r => setTimeout(r, 200));
-+                let reloadAttempted = false;
-+
-+                while (start > (Date.now() - 60000)) { // 60 segundos totais
-+                    // Check window.Store Injection (Com Anti-Deadlock do Puppeteer)
 +                    res = await Promise.race([
 +                        this.pupPage.evaluate('window.Store != undefined').catch(() => false),
 +                        new Promise(resolve => setTimeout(() => resolve(false), 5000))
 +                    ]);
 +                    if (res) { break; }
 +
-+                    // (WPP-SISTEM FIX): Se passar 30 segundos e ainda não estiver pronto,
-+                    // pode ser um deadlock do Service Worker carregando o DB corrompido.
-+                    // Dá F5 na página (Reload) UMA vez para tentar escapar do loop invisível do WhatsApp.
-+                    if (start < (Date.now() - 30000) && !reloadAttempted) {
-+                        try {
-+                            reloadAttempted = true;
-+                            // Resetamos o timer para dar mais 30s de chance após o reload
-+                            start = Date.now();
-+                            await this.pupPage.reload({ waitUntil: 'load', timeout: 30000 });
-+
-+                            // Re-injetamos a base pois o reload apagou o escopo da window
-+                            if (isCometOrAbove) {
-+                                await this.pupPage.evaluate(ExposeStore);
-+                            } else {
-+                                await new Promise(r => setTimeout(r, 2000));
-+                                await this.pupPage.evaluate(ExposeLegacyStore);
-+                            }
-+                        } catch (reloadErr) {
-+                            // Ignora, continua o loop até o timeout real de 60s
-+                        }
-+                    }
-+
-+                    await new Promise(r => setTimeout(r, 500));
++                    await new Promise(r => setTimeout(r, 1000));
                  }
 -                if(!res){
 -                    throw 'ready timeout';
@@ -104,16 +97,16 @@ index f68491f..8da2ab5 100644
                  }
  
                  /**
-@@ -282,7 +312,7 @@ class Client extends EventEmitter {
+@@ -282,7 +297,7 @@ class Client extends EventEmitter {
          });
          await exposeFunctionIfAbsent(this.pupPage, 'onLogoutEvent', async () => {
              this.lastLoggedOut = true;
 -            await this.pupPage.waitForNavigation({waitUntil: 'load', timeout: 5000}).catch((_) => _);
-+            await this.pupPage.waitForNavigation({ waitUntil: 'load', timeout: 5000 }).catch((_) => _);
++            await this.pupPage.waitForNavigation({ waitUntil: 'load', timeout: 0 }).catch((_) => _);
          });
          await this.pupPage.evaluate(() => {
              window.AuthStore.AppState.on('change:state', (_AppState, state) => { window.onAuthAppStateChangedEvent(state); });
-@@ -322,20 +352,20 @@ class Client extends EventEmitter {
+@@ -322,20 +337,20 @@ class Client extends EventEmitter {
              page = await browser.newPage();
          } else {
              const browserArgs = [...(puppeteerOpts.args || [])];
@@ -137,7 +130,7 @@ index f68491f..8da2ab5 100644
              await page.setUserAgent(this.options.userAgent);
          }
          if (this.options.bypassCSP) await page.setBypassCSP(true);
-@@ -350,8 +380,22 @@ class Client extends EventEmitter {
+@@ -350,8 +365,22 @@ class Client extends EventEmitter {
              await page.evaluateOnNewDocument(this.options.evalOnNewDoc);
          }
  
@@ -160,7 +153,7 @@ index f68491f..8da2ab5 100644
          await page.evaluateOnNewDocument(() => {
              const originalError = Error;
              window.originalError = originalError;
-@@ -363,17 +407,18 @@ class Client extends EventEmitter {
+@@ -363,24 +392,29 @@ class Client extends EventEmitter {
                  return error;
              };
          });
@@ -181,7 +174,19 @@ index f68491f..8da2ab5 100644
                  this.emit(Events.DISCONNECTED, 'LOGOUT');
                  await this.authStrategy.logout();
                  await this.authStrategy.beforeBrowserInitialized();
-@@ -579,7 +624,7 @@ class Client extends EventEmitter {
+                 await this.authStrategy.afterBrowserInitialized();
+                 this.lastLoggedOut = false;
+             }
+-            await this.inject();
++            try {
++                await this.inject();
++            } catch (injectErr) {
++                // Ignora erros de contexto destruído durante navegação — o próximo framenavigated tentará novamente
++            }
+         });
+     }
+ 
+@@ -579,7 +613,7 @@ class Client extends EventEmitter {
  
          });
  
@@ -190,7 +195,7 @@ index f68491f..8da2ab5 100644
              const chat = await this.getChatById(data.id);
  
              /**
-@@ -713,7 +758,7 @@ class Client extends EventEmitter {
+@@ -713,7 +747,7 @@ class Client extends EventEmitter {
  
          await exposeFunctionIfAbsent(this.pupPage, 'onEditMessageEvent', (msg, newBody, prevBody) => {
  
@@ -199,7 +204,7 @@ index f68491f..8da2ab5 100644
                  return;
              }
              /**
-@@ -764,7 +809,7 @@ class Client extends EventEmitter {
+@@ -764,7 +798,7 @@ class Client extends EventEmitter {
              window.Store.Chat.on('change:archive', async (chat, currState, prevState) => { window.onArchiveChatEvent(await window.WWebJS.getChatModel(chat), currState, prevState); });
              window.Store.Msg.on('add', (msg) => {
                  if (msg.isNewMsg) {
@@ -208,7 +213,7 @@ index f68491f..8da2ab5 100644
                          // defer message event until ciphertext is resolved (type changed)
                          msg.once('change:type', (_msg) => window.onAddMessageEvent(window.WWebJS.getMessageModel(_msg)));
                          window.onAddMessageCiphertextEvent(window.WWebJS.getMessageModel(msg));
-@@ -773,7 +818,7 @@ class Client extends EventEmitter {
+@@ -773,7 +807,7 @@ class Client extends EventEmitter {
                      }
                  }
              });
@@ -217,7 +222,7 @@ index f68491f..8da2ab5 100644
  
              if (window.compareWwebVersions(window.Debug.VERSION, '>=', '2.3000.1014111620')) {
                  const module = window.Store.AddonReactionTable;
-@@ -786,7 +831,7 @@ class Client extends EventEmitter {
+@@ -786,7 +820,7 @@ class Client extends EventEmitter {
                          const sender = reaction.author ?? reaction.from;
                          const senderUserJid = sender._serialized;
  
@@ -226,7 +231,7 @@ index f68491f..8da2ab5 100644
                      }));
  
                      return ogMethod(...args);
-@@ -833,7 +878,7 @@ class Client extends EventEmitter {
+@@ -833,7 +867,7 @@ class Client extends EventEmitter {
                          const parentMsgKey = window.Store.MsgKey.fromString(reaction.parentMsgKey);
                          const timestamp = reaction.timestamp / 1000;
  
@@ -235,7 +240,7 @@ index f68491f..8da2ab5 100644
                      }));
  
                      return ogMethod(...args);
-@@ -849,10 +894,10 @@ class Client extends EventEmitter {
+@@ -849,10 +883,10 @@ class Client extends EventEmitter {
          const requestedVersion = this.options.webVersion;
          const versionContent = await webCache.resolve(requestedVersion);
  
@@ -248,7 +253,7 @@ index f68491f..8da2ab5 100644
                      req.respond({
                          status: 200,
                          contentType: 'text/html',
-@@ -864,7 +909,7 @@ class Client extends EventEmitter {
+@@ -864,7 +898,7 @@ class Client extends EventEmitter {
              });
          } else {
              this.pupPage.on('response', async (res) => {
@@ -257,7 +262,7 @@ index f68491f..8da2ab5 100644
                      const indexHtml = await res.text();
                      this.currentIndexHtml = indexHtml;
                  }
-@@ -1038,12 +1083,12 @@ class Client extends EventEmitter {
+@@ -1038,12 +1072,12 @@ class Client extends EventEmitter {
          if (content instanceof MessageMedia) {
              internalOptions.media = content;
              internalOptions.isViewOnce = options.isViewOnce,
@@ -272,7 +277,7 @@ index f68491f..8da2ab5 100644
          } else if (content instanceof Location) {
              internalOptions.location = content;
              content = '';
-@@ -1073,10 +1118,10 @@ class Client extends EventEmitter {
+@@ -1073,10 +1107,10 @@ class Client extends EventEmitter {
          if (internalOptions.sendMediaAsSticker && internalOptions.media) {
              internalOptions.media = await Util.formatToWebpSticker(
                  internalOptions.media, {
@@ -287,7 +292,7 @@ index f68491f..8da2ab5 100644
              );
          }
  
-@@ -1247,7 +1292,7 @@ class Client extends EventEmitter {
+@@ -1247,7 +1281,7 @@ class Client extends EventEmitter {
      async getMessageById(messageId) {
          const msg = await this.pupPage.evaluate(async messageId => {
              let msg = window.Store.Msg.get(messageId);
@@ -296,7 +301,7 @@ index f68491f..8da2ab5 100644
  
              const params = messageId.split('_');
              if (params.length !== 3 && params.length !== 4) throw new Error('Invalid serialized message id specified');
-@@ -1255,10 +1300,10 @@ class Client extends EventEmitter {
+@@ -1255,10 +1289,10 @@ class Client extends EventEmitter {
              let messagesObject = await window.Store.Msg.getMessagesById([messageId]);
              if (messagesObject && messagesObject.messages.length) msg = messagesObject.messages[0];
  
@@ -309,7 +314,7 @@ index f68491f..8da2ab5 100644
          return null;
      }
  
-@@ -1404,7 +1449,7 @@ class Client extends EventEmitter {
+@@ -1404,7 +1438,7 @@ class Client extends EventEmitter {
       */
      async setDisplayName(displayName) {
          const couldSet = await this.pupPage.evaluate(async displayName => {
@@ -318,7 +323,7 @@ index f68491f..8da2ab5 100644
              await window.Store.Settings.setPushname(displayName);
              return true;
          }, displayName);
-@@ -1418,7 +1463,7 @@ class Client extends EventEmitter {
+@@ -1418,7 +1452,7 @@ class Client extends EventEmitter {
       */
      async getState() {
          return await this.pupPage.evaluate(() => {
@@ -327,7 +332,7 @@ index f68491f..8da2ab5 100644
              return window.Store.AppState.state;
          });
      }
-@@ -1530,7 +1575,7 @@ class Client extends EventEmitter {
+@@ -1530,7 +1564,7 @@ class Client extends EventEmitter {
       * @param {number} unmuteDateTs Timestamp at which the chat will be unmuted
       * @returns {Promise<{isMuted: boolean, muteExpiration: number}>}
       */
@@ -336,7 +341,7 @@ index f68491f..8da2ab5 100644
          return this.pupPage.evaluate(async (chatId, action, unmuteDateTs) => {
              const chat = window.Store.Chat.get(chatId) ?? await window.Store.Chat.find(chatId);
              action === 'MUTE'
-@@ -1564,7 +1609,7 @@ class Client extends EventEmitter {
+@@ -1564,7 +1598,7 @@ class Client extends EventEmitter {
                      ? await window.Store.ProfilePic.profilePicFind(chatWid)
                      : await window.Store.ProfilePic.requestProfilePicFromServer(chatWid);
              } catch (err) {
@@ -345,7 +350,7 @@ index f68491f..8da2ab5 100644
                  throw err;
              }
          }, contactId);
-@@ -1582,8 +1627,8 @@ class Client extends EventEmitter {
+@@ -1582,8 +1616,8 @@ class Client extends EventEmitter {
              let contact = window.Store.Contact.get(contactId);
              if (!contact) {
                  const wid = window.Store.WidFactory.createWid(contactId);
@@ -356,7 +361,7 @@ index f68491f..8da2ab5 100644
              }
  
              if (contact.commonGroups) {
-@@ -2174,12 +2219,12 @@ class Client extends EventEmitter {
+@@ -2174,12 +2208,12 @@ class Client extends EventEmitter {
              const labels = window.WWebJS.getLabels().filter(e => labelIds.find(l => l == e.id) !== undefined);
              const chats = window.Store.Chat.filter(e => chatIds.includes(e.id._serialized));
  
@@ -371,7 +376,7 @@ index f68491f..8da2ab5 100644
                      }
                  });
              });
-@@ -2412,16 +2457,15 @@ class Client extends EventEmitter {
+@@ -2412,16 +2446,15 @@ class Client extends EventEmitter {
       * @param {boolean} [syncToAddressbook = false] If set to true, the contact will also be saved to the user's address book on their phone. False by default
       * @returns {Promise<void>}
       */
@@ -394,7 +399,7 @@ index f68491f..8da2ab5 100644
              });
          }, phoneNumber, firstName, lastName, syncToAddressbook);
      }
-@@ -2431,11 +2475,10 @@ class Client extends EventEmitter {
+@@ -2431,11 +2464,10 @@ class Client extends EventEmitter {
       * @param {string} phoneNumber The contact's phone number in a format "17182222222", where "1" is a country code
       * @returns {Promise<void>}
       */
@@ -408,7 +413,7 @@ index f68491f..8da2ab5 100644
          }, phoneNumber);
      }
  
-@@ -2520,7 +2563,7 @@ class Client extends EventEmitter {
+@@ -2520,7 +2552,7 @@ class Client extends EventEmitter {
          if (!msg) return [];
          if (msg.type != MessageTypes.POLL_CREATION) throw 'Invalid usage! Can only be used with a pollCreation message';
  
@@ -417,7 +422,7 @@ index f68491f..8da2ab5 100644
              const msgKey = window.Store.MsgKey.fromString(msg.id._serialized);
              let pollVotes = await window.Store.PollsVotesSchema.getTable().equals(['parentMsgKey'], msgKey.toString());
  
-@@ -2533,7 +2576,7 @@ class Client extends EventEmitter {
+@@ -2533,7 +2565,7 @@ class Client extends EventEmitter {
              });
          }, msg);
  
@@ -427,7 +432,7 @@ index f68491f..8da2ab5 100644
  }
  
 diff --git a/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js b/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js
-index a14106d..c7ca247 100644
+index a14106d..9f1ea14 100644
 --- a/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js
 +++ b/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js
 @@ -36,7 +36,7 @@ class RemoteAuth extends BaseAuthStrategy {
@@ -460,7 +465,7 @@ index a14106d..c7ca247 100644
          }
          var self = this;
          this.backupSync = setInterval(async function () {
-@@ -106,30 +106,30 @@ class RemoteAuth extends BaseAuthStrategy {
+@@ -106,46 +106,57 @@ class RemoteAuth extends BaseAuthStrategy {
          const pathExists = await this.isValidPath(this.userDataDir);
          if (pathExists) {
              await this.compressSession();
@@ -495,9 +500,20 @@ index a14106d..c7ca247 100644
 -            await this.store.extract({session: this.sessionName, path: compressedSessionPath});
 +            await this.store.extract({ session: this.sessionName, path: compressedSessionPath });
              await this.unCompressSession(compressedSessionPath);
++            
++            // WPP-SISTEM FIX: Limpa locks que foram backupeados por engano com o browser aberto
++            const locks = ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'Default/lockfile', 'Default/Service Worker', 'Default/Cache', 'Default/Code Cache'];
++            for (const lock of locks) {
++                try {
++                    const lockPath = path.join(this.userDataDir, lock);
++                    if (fs.existsSync(lockPath)) {
++                        await fs.promises.rm(lockPath, { recursive: true, force: true }).catch(()=>{});
++                    }
++                } catch(e){}
++            }
          } else {
              fs.mkdirSync(this.userDataDir, { recursive: true });
-@@ -137,15 +137,15 @@ class RemoteAuth extends BaseAuthStrategy {
+         }
      }
  
      async deleteRemoteSession() {
@@ -516,7 +532,7 @@ index a14106d..c7ca247 100644
          await this.deleteMetadata();
          return new Promise((resolve, reject) => {
              archive
-@@ -161,12 +161,21 @@ class RemoteAuth extends BaseAuthStrategy {
+@@ -161,12 +172,21 @@ class RemoteAuth extends BaseAuthStrategy {
      async unCompressSession(compressedSessionPath) {
          var stream = fs.createReadStream(compressedSessionPath);
          await new Promise((resolve, reject) => {
@@ -544,7 +560,7 @@ index a14106d..c7ca247 100644
          });
          await fs.promises.unlink(compressedSessionPath);
      }
-@@ -185,9 +194,9 @@ class RemoteAuth extends BaseAuthStrategy {
+@@ -185,9 +205,9 @@ class RemoteAuth extends BaseAuthStrategy {
                              recursive: true,
                              force: true,
                              maxRetries: this.rmMaxRetries,
@@ -569,3 +585,33 @@ index f7ed110..34f2497 100644
  
          /**
           * Indicates if it is a Channel
+diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
+index 4fdc45d..c537fb7 100644
+--- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
++++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
+@@ -12,12 +12,23 @@ exports.LoadUtils = () => {
+     window.WWebJS.sendSeen = async (chatId) => {
+         const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
+         if (chat) {
+-            window.Store.WAWebStreamModel.Stream.markAvailable();
++            // FIX: mock `getLastMsgKeyForAction` faltante em novas versões do WhatsApp Web
++            if (typeof chat.getLastMsgKeyForAction !== 'function') {
++                chat.getLastMsgKeyForAction = function() {
++                    const msgs = this.msgs?.getModelsArray ? this.msgs.getModelsArray() : [];
++                    return msgs.length > 0 ? msgs[msgs.length - 1].id : null;
++                };
++            }
++            if (window.Store.WAWebStreamModel && window.Store.WAWebStreamModel.Stream) {
++                window.Store.WAWebStreamModel.Stream.markAvailable();
++            }
+             await window.Store.SendSeen.sendSeen({
+                 chat: chat,
+                 threadId: undefined
+             });         
+-            window.Store.WAWebStreamModel.Stream.markUnavailable();
++            if (window.Store.WAWebStreamModel && window.Store.WAWebStreamModel.Stream) {
++                window.Store.WAWebStreamModel.Stream.markUnavailable();
++            }
+             return true;
+         }
+         return false;
