@@ -501,7 +501,13 @@ class MessageHandler {
      * Enfileira ou Recusa a mensagem recebida baseando-se no Lock de Fila
      */
     async handleMessage(session, message, isHistory = false) {
-        const contactId = message.from;
+        // BUGFIX WPP-SISTEM: Comunidades e Grupos de Aviso retornam o @lid do admin no 'message.from', 
+        // enganando as identificações e fazendo o bot disparar em privado.
+        // O `message.id.remote` é ABSOLUTO e sempre carrega o ID real do Chat hospedeiro daquela mensagem.
+        let contactId = message.from;
+        if (message.id && message.id.remote) {
+            contactId = typeof message.id.remote === 'object' ? message.id.remote._serialized : String(message.id.remote);
+        }
 
         try {
             // 1. Filtros Absolutos (Bots, Grupos Desativados, Próprio Número)
