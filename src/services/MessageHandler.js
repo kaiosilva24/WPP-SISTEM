@@ -314,7 +314,7 @@ class MessageHandler {
 
         // Verifica se grupos estão desativados para esta conta
         if (contactId.includes('@g.us')) {
-            if (config.group_enabled === false) {
+            if (config.group_enabled === false || config.group_enabled == 0 || config.group_enabled === '0') {
                 logger.info(session.accountName, `🚫 Grupos desativados — ignorando mensagem de ${contactId}`);
                 return false;
             }
@@ -882,7 +882,7 @@ class MessageHandler {
             if (!willSendMedia) {
                 logger.info(session.accountName, `⌨️ [${typStep}/${totalSteps}] Delay de digitação: ${typingDelaySec}s (simulando digitando...)`);
                 try {
-                    await simulateTyping(chat, behavior.typingDelay);
+                    await humanBehavior.simulateTyping(session, contactId, behavior.typingDelay);
                     logger.info(session.accountName, `✏️ Fim da digitação`);
                 } catch (typingErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao simular digitação (ignorado): ${typingErr.message}`);
@@ -1067,17 +1067,10 @@ class MessageHandler {
                 const recDelaySec = (recordingDelay / 1000).toFixed(1);
                 logger.info(session.accountName, `🎤 Simulando gravação de áudio: ${recDelaySec}s (aparecendo foto de perfil gravando...)`);
                 try {
-                    const recordingChat = await session.client.getChatById(contactId);
-                    await recordingChat.sendStateRecording();
+                    await humanBehavior.simulateRecording(session, contactId, recordingDelay);
                 } catch (recErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao simular gravação (ignorado): ${recErr.message}`);
                 }
-                await delay(recordingDelay);
-                // Para o estado de gravação explicitamente antes de enviar
-                try {
-                    const recordingChat = await session.client.getChatById(contactId);
-                    await recordingChat.clearState();
-                } catch (_) { }
                 logger.info(session.accountName, `✅ Fim da simulação de gravação`);
             }
 

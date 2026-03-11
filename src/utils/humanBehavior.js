@@ -106,7 +106,7 @@ function getHumanBehaviorSequence(messageText = '') {
  * Simula digitação gradual (envia estado de digitação em intervalos) e fica ONLINE
  * Com prevenção de timeout para chamadas Presença do wwebjs.
  */
-async function simulateTyping(chat, duration) {
+async function simulateTyping(session, contactId, duration) {
     const intervals = Math.floor(duration / 3000); // A cada 3 segundos
 
     // Helpers seguros com timeout anti-travamento de Event Loop
@@ -122,20 +122,64 @@ async function simulateTyping(chat, duration) {
     // Removido sendPresenceAvailable falho daqui (Movido para o WhatsAppSession)
 
     for (let i = 0; i < intervals; i++) {
-        await safeExecute(chat.sendStateTyping(), 2000);
+        await safeExecute(session.client.pupPage.evaluate(chatId => {
+            window.WWebJS.sendChatstate('typing', chatId);
+        }, contactId), 2000);
         await delay(3000);
     }
 
     // Delay final
     const remaining = duration % 3000;
     if (remaining > 0) {
-        await safeExecute(chat.sendStateTyping(), 2000);
+        await safeExecute(session.client.pupPage.evaluate(chatId => {
+            window.WWebJS.sendChatstate('typing', chatId);
+        }, contactId), 2000);
         await delay(remaining);
     }
 
     // Para o estado de digitação explicitamente
     try {
-        await safeExecute(chat.clearState(), 2000);
+        await safeExecute(session.client.pupPage.evaluate(chatId => {
+            window.WWebJS.sendChatstate('stop', chatId);
+        }, contactId), 2000);
+    } catch (_) { }
+}
+
+/**
+ * Simula gravação gradual de áudio (envia estado de gravação) e fica ONLINE
+ */
+async function simulateRecording(session, contactId, duration) {
+    const safeExecute = async (promise, timeoutMs = 2000) => {
+        try {
+            await Promise.race([
+                promise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout WWebJS')), timeoutMs))
+            ]);
+        } catch (_) { }
+    };
+
+    // Apenas uma chamada que se segura por 25s, mas mandaremos a cada 5s para ficar seguro
+    const intervals = Math.floor(duration / 5000); 
+
+    for (let i = 0; i < intervals; i++) {
+        await safeExecute(session.client.pupPage.evaluate(chatId => {
+            window.WWebJS.sendChatstate('recording', chatId);
+        }, contactId), 2000);
+        await delay(5000);
+    }
+
+    const remaining = duration % 5000;
+    if (remaining > 0) {
+        await safeExecute(session.client.pupPage.evaluate(chatId => {
+            window.WWebJS.sendChatstate('recording', chatId);
+        }, contactId), 2000);
+        await delay(remaining);
+    }
+
+    try {
+        await safeExecute(session.client.pupPage.evaluate(chatId => {
+            window.WWebJS.sendChatstate('stop', chatId);
+        }, contactId), 2000);
     } catch (_) { }
 }
 
@@ -158,5 +202,6 @@ module.exports = {
     getActivityMultiplier,
     getHumanBehaviorSequence,
     simulateTyping,
+    simulateRecording,
     formatDelay
 };
