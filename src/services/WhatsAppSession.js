@@ -281,7 +281,7 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-backgrounding-occluded-windows', 
                         '--disable-renderer-backgrounding',         
                         '--disable-ipc-flooding-protection',        
-                        '--js-flags="--max-old-space-size=1024 --expose-gc"', // Memória V8
+                        '--js-flags="--max-old-space-size=2048"', // Libera mais Memória V8 (2GB limite seguro em server 4GB)
                         '--memory-pressure-off',
                         '--no-recovery-component',
                         '--disable-session-crashed-bubble',
