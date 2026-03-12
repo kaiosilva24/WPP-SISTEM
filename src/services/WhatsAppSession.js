@@ -280,7 +280,12 @@ class WhatsAppSession extends EventEmitter {
                         // '--single-process', // <-- REMOVIDO: Causa DEADLOCKs no WhatsappWeb na Discloud (Thread única)
                         '--disable-backgrounding-occluded-windows', 
                         '--disable-renderer-backgrounding',         
-                        '--disable-ipc-flooding-protection',        
+                        '--disable-ipc-flooding-protection',
+                        '--renderer-process-limit=1', // Limita a 1 processo de renderização por aba
+                        '--disable-threaded-scrolling', // Remove thread separada de rolagem
+                        '--disable-threaded-animation', // Remove thread separada de animação
+                        '--disable-vulkan-surface',     // Desativa componentes Vulkan
+                        '--disable-crash-reporter', 
                         '--js-flags="--max-old-space-size=2048"', // Libera mais Memória V8 (2GB limite seguro em server 4GB)
                         '--memory-pressure-off',
                         '--no-recovery-component',
