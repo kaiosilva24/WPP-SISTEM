@@ -22,8 +22,8 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason, promise) => {
     // Ignora erros esperados de browser fechando durante inject
     const reasonStr = String(reason);
-    if (reasonStr.includes('TargetCloseError') || reasonStr.includes('Target closed') || reasonStr.includes('Protocol error') || reasonStr.includes('Execution context was destroyed')) {
-        logger.warn(null, `[Browser] Conexão fechada durante operação (ignorado)`);
+    if (reasonStr.includes('TargetCloseError') || reasonStr.includes('Target closed') || reasonStr.includes('ProtocolError') || reasonStr.includes('Protocol error') || reasonStr.includes('Execution context was destroyed')) {
+        // Ignorado sem poluir logs excessivamente
         return;
     }
     logger.error(null, `Unhandled Rejection: ${reason}`);

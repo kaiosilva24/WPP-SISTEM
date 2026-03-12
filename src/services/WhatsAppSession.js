@@ -306,7 +306,8 @@ class WhatsAppSession extends EventEmitter {
                         
                         // [WPP-SISTEM FIX] - Otimização de Threads/Proc para Discloud (Container restrictions)
                         '--renderer-process-limit=2',
-                        '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways,AudioServiceOutOfProcess,NetworkServiceInProcess,FontSrcLocalMatching,DialMediaRouteProvider',
+                        '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways,AudioServiceOutOfProcess,FontSrcLocalMatching,DialMediaRouteProvider',
+                        '--enable-features=NetworkServiceInProcess',
                         '--in-process-gpu',
 
                         // RemoteAuth gerencia o --user-data-dir internamente
