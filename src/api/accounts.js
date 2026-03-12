@@ -647,17 +647,18 @@ router.post('/:id/stop', async (req, res) => {
 router.post('/:id/pause', async (req, res) => {
     try {
         const session = sessionManager.getSession(req.params.id);
-        if (session) {
-            console.log(`[API] Pausando conta e Desconectando WAN: ${req.params.id}`);
+
+        if (session && !session.isPaused) {
+            console.log(`[API] Pausando conta manualmente pelo operador e Desconectando WAN: ${req.params.id}`);
             await session.pause();
 
             // Força atualização no React
             const webServer = req.app.get('webServer');
             if (webServer) webServer.broadcastUpdate();
 
-            res.json({ message: 'Conta em modo Standby e Rede Isolada' });
+            res.json({ message: 'Conta em modo Standby (Rede Isolada)' });
         } else {
-            return res.status(404).json({ error: 'Nenhuma sessão ativa encontrada' });
+            return res.status(404).json({ error: 'Sessão inexistente ou já pausada/desconectada' });
         }
     } catch (error) {
         res.status(500).json({ error: error.message });

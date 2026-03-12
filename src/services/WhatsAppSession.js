@@ -753,7 +753,7 @@ class WhatsAppSession extends EventEmitter {
 
                 if (this._diagRunning) return;
 
-                if (this.status !== 'authenticated' || !this.client?.pupPage) {
+                if (this.status !== 'authenticated' || this.isPaused || this.status === 'paused' || !this.client?.pupPage) {
                     if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
                     return;
                 }
@@ -1466,6 +1466,25 @@ class WhatsAppSession extends EventEmitter {
 
         this.isPaused = true;
         this.status = 'paused'; // Adotamos o status visual paused
+        
+        // Finaliza timers de diagnóstico pendentes caso o usuário pause a conta durante a injeção WP
+        if (this._diagnosticInterval) {
+            clearInterval(this._diagnosticInterval);
+            this._diagnosticInterval = null;
+        }
+        if (this._diagnosticTimeout) {
+            clearTimeout(this._diagnosticTimeout);
+            this._diagnosticTimeout = null;
+        }
+        if (this._injectRecoveryTimeout) {
+            clearTimeout(this._injectRecoveryTimeout);
+            this._injectRecoveryTimeout = null;
+        }
+
+        // Reseta flags de inicialização para que a conta possa ser retomada/reiniciada limpo depois
+        this.isInitializing = false;
+        this._suspendDiagnostic = false;
+        this._evalTimeoutCount = 0;
 
         this.stopPresenceLoop();
         try { if (this.client) await this.client.sendPresenceUnavailable(); } catch (e) { }
