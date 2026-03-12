@@ -356,8 +356,25 @@ class MessageHandler {
      * Roda a cada 5 segundos verificando se as contas estão livres para processar novas mensagens
      */
     startQueueProcessor() {
+        // Variável de controle para impedir que a MESMA conta inicie respostas 
+        // de Privado e Grupo no mesmo exato segundo (ação não humana)
+        this.globalActivelyProcessing = new Set();
+
         setInterval(async () => {
             for (const [accountId, queues] of this.globalQueue.entries()) {
+                // Checa Pausa Automática (após N respostas) da conta INTEIRA
+                const pauseEnd = this.pauseUntil.get(accountId);
+                if (pauseEnd && Date.now() < pauseEnd) {
+                    continue; // A conta inteira está pausada!
+                }
+
+                // Verifica se a conta já está "digitando/enviando" ativamente em algum lugar (Privado OU Grupo)
+                if (this.globalActivelyProcessing.has(accountId)) {
+                    continue; // Aguarda a interação atual acabar para não parecer robô respondendo a 2 chats no mesmo segundo
+                }
+
+                let processedSomething = false;
+
                 // Tenta processar Grupo
                 if (queues.group.length > 0) {
                     if (!this.globalGroupProcessing.has(accountId)) {
@@ -366,6 +383,8 @@ class MessageHandler {
                             // Conta livre! Desenfileira e processa
                             const item = queues.group.shift();
                             this.globalGroupProcessing.add(accountId);
+                            this.globalActivelyProcessing.add(accountId); // Marca que está digitando
+                            processedSomething = true;
                             // Processa de forma síncrona/segura o release do lock para não prender a fila
                             (async () => {
                                 try {
@@ -374,20 +393,22 @@ class MessageHandler {
                                     logger.error(accountId, `Erro não tratado na fila de grupos: ${e.message}`);
                                 } finally {
                                     this.globalGroupProcessing.delete(accountId);
+                                    this.globalActivelyProcessing.delete(accountId);
                                 }
                             })();
                         }
                     }
                 }
 
-                // Tenta processar Privado
-                if (queues.private.length > 0) {
+                // Tenta processar Privado (Apenas se não começou a processar um grupo neste mesmo segundo)
+                if (!processedSomething && queues.private.length > 0) {
                     if (!this.globalPrivateProcessing.has(accountId)) {
                         const cooldownEnd = this.globalPrivateCooldown.get(accountId);
                         if (!cooldownEnd || Date.now() >= cooldownEnd) {
                             // Conta livre! Desenfileira e processa
                             const item = queues.private.shift();
                             this.globalPrivateProcessing.add(accountId);
+                            this.globalActivelyProcessing.add(accountId); // Marca que está digitando
                             // Processa de forma síncrona/segura o release do lock para não prender a fila
                             (async () => {
                                 try {
@@ -396,6 +417,7 @@ class MessageHandler {
                                     logger.error(accountId, `Erro não tratado na fila privada: ${e.message}`);
                                 } finally {
                                     this.globalPrivateProcessing.delete(accountId);
+                                    this.globalActivelyProcessing.delete(accountId);
                                 }
                             })();
                         }
@@ -472,13 +494,8 @@ class MessageHandler {
      * Aplica o Cooldown Global após responder
      */
     applyGlobalCooldown(session, isGroup) {
-        // [WPP-SISTEM FIX]: Aguarda a fila esvaziar COMPLETAMENTE antes de aplicar a Pausa Global (Responde "Enfileirado")
-        const queues = this.globalQueue.get(session.accountId);
-        if (queues) {
-            if (isGroup && queues.group.length > 0) return;
-            if (!isGroup && queues.private.length > 0) return;
-        }
-
+        // [WPP-SISTEM FIX]: Removido o bypass de fila. O usuário deseja que TODA E QUALQUER mensagem
+        // na fila respeite o intervalo após cada envio, sendo enviada UMA A UMA com a pausa entre elas.
         const config = this.getAccountConfig(session);
         if (isGroup) {
             const globalGroupDelayMinutes = config.global_group_delay_minutes || 0;
