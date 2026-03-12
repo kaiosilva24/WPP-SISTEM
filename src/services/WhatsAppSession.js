@@ -725,24 +725,33 @@ class WhatsAppSession extends EventEmitter {
             this._evalTimeoutCount = 0; // Previne vazamento de state da sessão anterior
 
             const runDiagnostic = async () => {
-                if (this._diagRunning) return; // Evita sobreposição simples
-                if (this._diagPending) {
-                    // Já existe uma Promessa Presa no Puppeteer
+                // [WPP-SISTEM FIX]: Se o browser está ocupado (IndexedDB sync), paramos de enviar evaluates
+                // Eles são bloqueados pelo Chrome e causam congestionamento no protocolo CDP do Puppeteer
+                // O WWebJS vai disparar o evento 'ready' quando concluir - simplesmente esperamos
+                if (this._suspendDiagnostic) {
                     this._evalTimeoutCount = (this._evalTimeoutCount || 0) + 1;
-                    
-                    if (this._evalTimeoutCount % 2 === 0) { // Log somente a cada 10 segundos
-                         logger.info(this.accountName, `⏳ [STARTUP] Sincronizando mensagens iniciais do WhatsApp com o banco local... (Aguarde)`);
+                    if (this._evalTimeoutCount % 2 === 0) {
+                        logger.info(this.accountName, `⏳ [STARTUP] Sincronizando mensagens iniciais do WhatsApp com o banco local... (Aguarde)`);
                     }
-
-                    if (this._evalTimeoutCount >= 180) { 
-                        // 180 x 5s = 900s no limite máximo global de espera da engine do Chromium.
-                        // APENAS LOG. NÃO RECARREGUE! O WWebJS perde os eventos se a página for reiniciada depois de Autenticada.
-                        logger.warn(this.accountName, `🚨 Sincronização demorando mais que 15 minutos na página (Descriptografando Banco Oculto). Aguarde mais um pouco.`);
+                    // Timeout de segurança: após 15 minutos sem ready, força reconexão
+                    if (this._evalTimeoutCount >= 180) {
+                        logger.warn(this.accountName, `🚨 [STARTUP] Sincronização travou por mais de 15 minutos. Forçando reconexão...`);
+                        this._suspendDiagnostic = false;
                         this._evalTimeoutCount = 0;
-                        this._diagPending = false;
+                        if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
+                        try {
+                            await this.destroy(false);
+                            const db = require('../database/DatabaseManager');
+                            await db.updateAccountStatus(this.accountId, 'disconnected');
+                            if (!this.intentionalStop) {
+                                setTimeout(() => this.reconnect(), 5000);
+                            }
+                        } catch (err) { logger.error(this.accountName, `Erro recovery: ${err.message}`); }
                     }
                     return;
                 }
+
+                if (this._diagRunning) return;
 
                 if (this.status !== 'authenticated' || !this.client?.pupPage) {
                     if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
@@ -750,7 +759,6 @@ class WhatsAppSession extends EventEmitter {
                 }
 
                 this._diagRunning = true;
-                this._diagPending = true;
                 try {
                     const diag = await Promise.race([
                         this.client.pupPage.evaluate(() => {
@@ -763,31 +771,19 @@ class WhatsAppSession extends EventEmitter {
                         new Promise(resolve => setTimeout(() => resolve({ appState: 'EVAL_TIMEOUT', hasSynced: '?', wwebjsReady: false }), 45000))
                     ]);
 
-                    // Só tira a pendência se NÃO for EVAL_TIMEOUT falso 
-                    // (porque se deu timeout, a promise ali em cima evaluate ainda ta rodando no fundo)
-                    if (diag.appState !== 'EVAL_TIMEOUT') {
-                        this._diagPending = false;
-                    }
-
                     logger.info(this.accountName, `🔬 [DIAG] AppState=${diag.appState} | hasSynced=${diag.hasSynced} | WWebJS=${diag.wwebjsReady}`);
 
-                    // CASO 1: EVAL_TIMEOUT — página bloqueada, provável carregamento pesado
+                    // CASO 1: EVAL_TIMEOUT — Chrome bloqueado processando IndexedDB
+                    // [WPP-SISTEM FIX CRITICAL]: Para COMPLETAMENTE de enviar evaluates.
+                    // Deixa o WWebJS trabalhar sem competição no canal CDP.
                     if (diag.appState === 'EVAL_TIMEOUT') {
-                        this._evalTimeoutCount = (this._evalTimeoutCount || 0) + 1;
-                        // Silencia o warn caso 1 de carregamento, loga apenas em progressos
-                        if (this._evalTimeoutCount % 3 === 0) {
-                            logger.info(this.accountName, `⏳ O navegador (Chromium) iniciou a sincronização principal e aplicação dos hooks do WhatsApp... `);
-                        }
-                        this._pageErrorCount = 0;
-
-                        // NOTA WPP-SISTEM: 
-                        // A recuperação pesada (F5 ou timeout fatal) agora é responsabilidade 
-                        // integral e exclusiva do loop de injeção resiliente dentro do Client.js (whatsapp-web.js)
+                        this._evalTimeoutCount = 0;
+                        this._suspendDiagnostic = true;
+                        logger.info(this.accountName, `⏳ [STARTUP] Chrome ocupado com sincronização (IndexedDB). Diagnóstico suspenso para não obstruir o inject do WWebJS...`);
                     }
                     // CASO 2: PAGE_ERROR — página com certeza crashou internamente
                     else if (diag.appState === 'PAGE_ERROR' || diag.appState === 'ERRO') {
-                        this._evalTimeoutCount = 0;
-                        this._pageErrorCount++;
+                        this._pageErrorCount = (this._pageErrorCount || 0) + 1;
                         if (this._pageErrorCount >= 4) { // 20s confirmação
                             logger.error(this.accountName, `💀 [DIAG] Página crashou (${this._pageErrorCount}x). Recarregando a página (F5) para tentar recuperar...`);
                             this._pageErrorCount = 0;
@@ -798,10 +794,9 @@ class WhatsAppSession extends EventEmitter {
                             }
                         }
                     }
-                    // CASO 2: CONNECTED + hasSynced mas WWebJS ausente → re-inject
+                    // CASO 3: CONNECTED + hasSynced mas WWebJS ausente → re-inject
                     else if (diag.appState === 'CONNECTED' && diag.hasSynced === true && !diag.wwebjsReady) {
-                        this._evalTimeoutCount = 0;
-                        this._connectedSyncedCount++;
+                        this._connectedSyncedCount = (this._connectedSyncedCount || 0) + 1;
                         this._pageErrorCount = 0;
                         logger.warn(this.accountName, `🔄 [AUTO-FIX] CONECTADO sem WWebJS (${this._connectedSyncedCount}x). Re-injetando...`);
                         try {
@@ -816,12 +811,11 @@ class WhatsAppSession extends EventEmitter {
                             }
                         }
                     }
-                    // CASO 4: WWebJS presente na página mas o Evento 'ready' nunca disparou no Node.js (Vítima de Navigation / Context Destroyed)
+                    // CASO 4: WWebJS presente mas evento 'ready' nunca disparou
                     else if (diag.appState === 'CONNECTED' && diag.hasSynced === true && diag.wwebjsReady === true) {
-                        this._evalTimeoutCount = 0;
                         this._readyWaitCount = (this._readyWaitCount || 0) + 1;
-                        if (this._readyWaitCount >= 4) { // 20 segundos travado esperando o ready
-                            logger.warn(this.accountName, `🚨 [AUTO-FIX] Contexto JS travou durante o Inject (Navigation). Recarregando a página para destrancar a lib...`);
+                        if (this._readyWaitCount >= 4) { // 20 segundos travado
+                            logger.warn(this.accountName, `🚨 [AUTO-FIX] Contexto JS travou durante o Inject. Recarregando a página...`);
                             this._readyWaitCount = 0;
                             try {
                                 await this.client.pupPage.reload({ waitUntil: 'domcontentloaded' });
@@ -832,7 +826,6 @@ class WhatsAppSession extends EventEmitter {
                     }
                     // CASO 5: Qualquer outro estado → reset contadores
                     else {
-                        this._evalTimeoutCount = 0;
                         this._connectedSyncedCount = 0;
                         this._pageErrorCount = 0;
                         this._readyWaitCount = 0;
@@ -847,7 +840,7 @@ class WhatsAppSession extends EventEmitter {
             this._diagnosticTimeout = setTimeout(() => runDiagnostic(), 3000);
             this._diagnosticInterval = setInterval(() => runDiagnostic(), 5000);
 
-            // FALLBACK RECOVERY: Se nada funcionou em 300s, força recovery
+            // FALLBACK RECOVERY: Se nada funcionou em 900s, força recovery
             if (this._injectRecoveryTimeout) clearTimeout(this._injectRecoveryTimeout);
             if (!this._injectFailCount) this._injectFailCount = 0;
             this._injectRecoveryTimeout = setTimeout(async () => {
@@ -877,7 +870,7 @@ class WhatsAppSession extends EventEmitter {
                     }
                     this.emit('inject_timeout');
                 }
-            }, 900000); // 15 minutos de tolerância máxima para VPS super lentas (criação de indexedDB via RemoteAuth)
+            }, 900000); // 15 minutos de tolerância máxima
         });
 
         // Pronto
