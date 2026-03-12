@@ -281,9 +281,6 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-backgrounding-occluded-windows', 
                         '--disable-renderer-backgrounding',         
                         '--disable-ipc-flooding-protection',
-                        '--renderer-process-limit=1', // Limita a 1 processo de renderização por aba
-                        '--disable-threaded-scrolling', // Remove thread separada de rolagem
-                        '--disable-threaded-animation', // Remove thread separada de animação
                         '--disable-vulkan-surface',     // Desativa componentes Vulkan
                         '--disable-crash-reporter', 
                         '--js-flags="--max-old-space-size=2048"', // Libera mais Memória V8 (2GB limite seguro em server 4GB)
@@ -344,6 +341,13 @@ class WhatsAppSession extends EventEmitter {
             this.injectWebRTCBlocker();
 
             await this.client.initialize();
+            
+            // [WPP-SISTEM FIX]: Discloud CPU Spike & Deadlock Prevention
+            // Aguarda 25 segundos antes de liberar o processo de inicialização e o Lock da Fila Global
+            // Impede que 2 ou mais contas abram Chromium e extraiam banco de dados simultaneamente (EAGAIN & EVAL_TIMEOUT)
+            logger.info(this.accountName, `⏳ [Fila Global] Navegador rodando. Aguardando estabilização (25s) antes de abrir a próxima conta...`);
+            await new Promise(resolve => setTimeout(resolve, 25000));
+            
             this.isInitializing = false;
 
         } catch (error) {
