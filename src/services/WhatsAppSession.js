@@ -283,7 +283,7 @@ class WhatsAppSession extends EventEmitter {
                         '--disable-ipc-flooding-protection',
                         '--disable-vulkan-surface',     // Desativa componentes Vulkan
                         '--disable-crash-reporter', 
-                        '--js-flags="--max-old-space-size=2048"', // Libera mais Memória V8 (2GB limite seguro em server 4GB)
+                        '--js-flags="--max-old-space-size=1024"', // Limitado para 1GB para caber mais contêineres e threads
                         '--memory-pressure-off',
                         '--no-recovery-component',
                         '--disable-session-crashed-bubble',
@@ -303,7 +303,11 @@ class WhatsAppSession extends EventEmitter {
                         '--no-default-browser-check',
                         '--no-experiments',
                         '--safebrowsing-disable-auto-update',
-                        '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways,AudioServiceOutOfProcess,TranslateUI,BlinkGenPropertyTrees',
+                        
+                        // [WPP-SISTEM FIX] - Otimização de Threads/Proc para Discloud (Container restrictions)
+                        '--renderer-process-limit=2',
+                        '--disable-features=IsolateOrigins,site-per-process,CrossSiteDocumentBlockingIfIsolating,CrossSiteDocumentBlockingAlways,AudioServiceOutOfProcess,NetworkServiceInProcess,FontSrcLocalMatching,DialMediaRouteProvider',
+                        '--in-process-gpu',
 
                         // RemoteAuth gerencia o --user-data-dir internamente
 
@@ -1579,23 +1583,36 @@ class WhatsAppSession extends EventEmitter {
                     logger.warn(this.accountName, `Destroy falhou/timeout (${e.message})`);
                 }
 
-                // Fecha browser com timeout de 5s
+                // Fecha browser com timeout de 3s
                 try {
                     if (browser) {
                         await Promise.race([
                             browser.close(),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('browser close timeout')), 5000))
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('browser close timeout')), 3000))
                         ]);
                     }
                 } catch (e) {
                     logger.warn(this.accountName, `Browser close falhou (${e.message})`);
-                    // FORCE KILL: Se nada funcionou, mata o processo do Chrome
-                    if (browserPid) {
-                        try {
-                            process.kill(browserPid, 'SIGKILL');
-                            logger.warn(this.accountName, `🔪 Browser force-killed (PID: ${browserPid})`);
-                        } catch (killErr) { /* processo já morreu */ }
-                    }
+                } finally {
+                    // FORCE KILL: Limpeza extrema de zumbis do Chromium atrelados a este userDataDir
+                    try {
+                        let forceKilled = false;
+                        if (browserPid) {
+                            try { process.kill(browserPid, 'SIGKILL'); forceKilled = true; } catch (e) {}
+                        }
+                        
+                        // Fallback Linux: Mata agressivamente qualquer Chromium com o token dessa conta no Cmdline
+                        if (process.platform === 'linux') {
+                            const { execSync } = require('child_process');
+                            try {
+                                const accountToken = `RemoteAuth-account-${this.accountId}`;
+                                execSync(`pkill -9 -f "${accountToken}"`);
+                                forceKilled = true;
+                            } catch (e) {}
+                        }
+                        
+                        if (forceKilled) logger.warn(this.accountName, `🔪 Processos do Browser eliminados a força para evitar zumbis`);
+                    } catch (killErr) { /* ignora erros de force-kill */ }
                 }
 
                 this.client = null;
