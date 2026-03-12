@@ -242,7 +242,10 @@ class MessageHandler {
                 try {
                     // Tenta o método interno injetado pelo whatsapp-web.js para forçar a marcação de lido
                     if (window.WWebJS && typeof window.WWebJS.sendSeen === 'function') {
-                        await window.WWebJS.sendSeen(chatId);
+                        await Promise.race([
+                            window.WWebJS.sendSeen(chatId),
+                            new Promise(resolve => setTimeout(resolve, 2000)) // Trava de 2s pra evitar Runtime.callFunctionOn timed out do Puppeteer
+                        ]);
                     }
 
                     // Fallback visual extremo: Tenta clicar no chat na lista lateral se a bolinha ainda existir
@@ -298,12 +301,26 @@ class MessageHandler {
             return false;
         }
 
-        // Ignora notificações de sistema (nunca têm body nem tipo de mídia)
-        // Áudio, imagem, vídeo e figurinha têm body vazio mas NÃO são notificação
-        const SYSTEM_TYPES = ['e2e_notification', 'notification_template', 'notification', 'call_log', 'protocol', 'gp2'];
-        if (messageBody && SYSTEM_TYPES.includes(messageBody.type)) {
-            logger.messageIgnored(session.accountName, contactId, `notificação de sistema`);
+        // Ignora Canais (Newsletters) e Broadcasts de Status
+        if (contactId.includes('@newsletter') || contactId.includes('@broadcast')) {
+            logger.messageIgnored(session.accountName, contactId, 'Canais/Broadcasts não suportam respostas normais');
             return false;
+        }
+
+        // Ignora notificações de sistema e mensagens de protocolo fantasmas (Comunidades geram msgs vazias do tipo 'unknown' de @lids)
+        const SYSTEM_TYPES = ['e2e_notification', 'notification_template', 'notification', 'call_log', 'protocol', 'gp2', 'unknown', 'broadcast_notification', 'ciphertext', 'revoked', 'group_notification'];
+        if (messageBody && SYSTEM_TYPES.includes(messageBody.type)) {
+            logger.messageIgnored(session.accountName, contactId, `sistema/invisível (${messageBody.type})`);
+            return false;
+        }
+
+        // Dupla checagem: Rejeita mensagens que não tenham mídia nem texto (mensagens invisíveis de Linked Devices)
+        if (messageBody && !messageBody.hasMedia && (!messageBody.body || messageBody.body.trim() === '')) {
+            const allowedEmptyTypes = ['location', 'vcard', 'contact_card', 'multi_vcard', 'revoked', 'poll_creation'];
+            if (!allowedEmptyTypes.includes(messageBody.type)) {
+                logger.messageIgnored(session.accountName, contactId, `mensagem fantasma/vazia de tipo ${messageBody.type || 'vazio'}`);
+                return false;
+            }
         }
 
         // Verifica blacklist
@@ -455,6 +472,13 @@ class MessageHandler {
      * Aplica o Cooldown Global após responder
      */
     applyGlobalCooldown(session, isGroup) {
+        // [WPP-SISTEM FIX]: Aguarda a fila esvaziar COMPLETAMENTE antes de aplicar a Pausa Global (Responde "Enfileirado")
+        const queues = this.globalQueue.get(session.accountId);
+        if (queues) {
+            if (isGroup && queues.group.length > 0) return;
+            if (!isGroup && queues.private.length > 0) return;
+        }
+
         const config = this.getAccountConfig(session);
         if (isGroup) {
             const globalGroupDelayMinutes = config.global_group_delay_minutes || 0;
