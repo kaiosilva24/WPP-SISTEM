@@ -1405,7 +1405,12 @@ class WhatsAppSession extends EventEmitter {
         let unsavedContactsCount = this.unsavedContactsCount; // fallback para o cache
         if (this.status === 'ready' && this.client) {
             try {
-                const chats = await this.client.getChats();
+                // Timeout critical para evitar travar GET /api/accounts no Frontend
+                const chats = await Promise.race([
+                    this.client.getChats(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout getChats')), 2000))
+                ]);
+                
                 // Conta chats privados cujo nome parece numero de telefone (= nao salvo na agenda)
                 unsavedContactsCount = chats.filter(chat => {
                     if (chat.isGroup) return false;
@@ -1418,7 +1423,7 @@ class WhatsAppSession extends EventEmitter {
                 }).length;
                 this.unsavedContactsCount = unsavedContactsCount; // atualiza o cache
             } catch (e) {
-                // usa o cache em caso de erro
+                // usa o cache em caso de erro ou timeout 
             }
         }
 
