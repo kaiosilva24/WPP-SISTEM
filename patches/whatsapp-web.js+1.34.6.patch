@@ -432,7 +432,7 @@ index f68491f..bfa9da4 100644
  }
  
 diff --git a/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js b/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js
-index a14106d..9f1ea14 100644
+index a14106d..e536aba 100644
 --- a/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js
 +++ b/node_modules/whatsapp-web.js/src/authStrategies/RemoteAuth.js
 @@ -36,7 +36,7 @@ class RemoteAuth extends BaseAuthStrategy {
@@ -465,7 +465,7 @@ index a14106d..9f1ea14 100644
          }
          var self = this;
          this.backupSync = setInterval(async function () {
-@@ -106,46 +106,57 @@ class RemoteAuth extends BaseAuthStrategy {
+@@ -106,46 +106,65 @@ class RemoteAuth extends BaseAuthStrategy {
          const pathExists = await this.isValidPath(this.userDataDir);
          if (pathExists) {
              await this.compressSession();
@@ -498,8 +498,17 @@ index a14106d..9f1ea14 100644
          }
          if (sessionExists) {
 -            await this.store.extract({session: this.sessionName, path: compressedSessionPath});
+-            await this.unCompressSession(compressedSessionPath);
 +            await this.store.extract({ session: this.sessionName, path: compressedSessionPath });
-             await this.unCompressSession(compressedSessionPath);
++            
++            try {
++                await this.unCompressSession(compressedSessionPath);
++            } catch (err) {
++                console.error(`[RemoteAuth] 🚨 ERRO CRÍTICO NA DESCOMPACTAÇÃO DO BACKUP (Z_BUF_ERROR ou Arquivo Corrompido). Backup ${this.sessionName} foi destruído e a sessão será reiniciada limpa! Erro original: ${err.message}`);
++                await this.deleteRemoteSession();
++                fs.mkdirSync(this.userDataDir, { recursive: true });
++                return; // Corta a execução aqui e segue para recriar
++            }
 +            
 +            // WPP-SISTEM FIX: Limpa locks que foram backupeados por engano com o browser aberto
 +            const locks = ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'Default/lockfile', 'Default/Service Worker', 'Default/Cache', 'Default/Code Cache'];
@@ -532,7 +541,7 @@ index a14106d..9f1ea14 100644
          await this.deleteMetadata();
          return new Promise((resolve, reject) => {
              archive
-@@ -161,12 +172,21 @@ class RemoteAuth extends BaseAuthStrategy {
+@@ -161,12 +180,21 @@ class RemoteAuth extends BaseAuthStrategy {
      async unCompressSession(compressedSessionPath) {
          var stream = fs.createReadStream(compressedSessionPath);
          await new Promise((resolve, reject) => {
@@ -560,7 +569,7 @@ index a14106d..9f1ea14 100644
          });
          await fs.promises.unlink(compressedSessionPath);
      }
-@@ -185,9 +205,9 @@ class RemoteAuth extends BaseAuthStrategy {
+@@ -185,9 +213,9 @@ class RemoteAuth extends BaseAuthStrategy {
                              recursive: true,
                              force: true,
                              maxRetries: this.rmMaxRetries,
