@@ -262,6 +262,8 @@ class WhatsAppSession extends EventEmitter {
                     store: store,
                     backupSyncIntervalMs: 300000 // Salva sessão no PostgreSQL a cada 5 minutos
                 }),
+                authTimeoutMs: 180000,   // 3 Minutos: Dá muita margem de tempo para um container lento na Discloud terminar o processo interno
+                qrMaxRetries: 5,         // Permite o Chrome demorar para abrir o QR code
                 requestTimeout: 120000,  // 2 minutos para ambientes cloud
                 puppeteer: {
                     // Em produção (Linux), força headless. Remove executablePath para usar bundled Chromium
@@ -1079,6 +1081,9 @@ class WhatsAppSession extends EventEmitter {
                         if (state !== 'CONNECTED') {
                             logger.error(this.accountName, `💀 [HEALTH] Conexão MORTA! AppState=${state}. Forçando reconexão...`);
                             this._presenceFailCount = 0;
+                            // Previne vazamentos no loop:
+                            if (this._diagnosticInterval) { clearInterval(this._diagnosticInterval); this._diagnosticInterval = null; }
+                            
                             this.stopPresenceLoop();
                             this.stopStandbyLoop();
                             this.stopContactSyncLoop();
