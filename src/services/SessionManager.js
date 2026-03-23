@@ -52,9 +52,10 @@ class SessionManager extends EventEmitter {
                 throw new Error(`Conta ${accountId} não encontrada no banco de dados`);
             }
 
-            const session = new WhatsAppSession(accountId, accountName, account);
-            if (options) {
-                session.setRuntimeOptions(options);
+            const session = new WhatsAppSession(account);
+            if (options && Object.keys(options).length > 0) {
+                // Merge params if any
+                session.config = { ...session.config, ...options };
             }
 
             // Propaga eventos da sessão

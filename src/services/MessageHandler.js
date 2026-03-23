@@ -143,40 +143,9 @@ class MessageHandler {
      * Usando uma combinação de sendSeen e clique na UI como fallback caso a engine do WWebJS falhe
      */
     async forceMarkRead(session, contactId) {
-        if (!session || !session.client || !session.client.pupPage) return;
-
-        try {
-            await session.client.pupPage.evaluate(async (chatId) => {
-                try {
-                    // Tenta o método interno injetado pelo whatsapp-web.js para forçar a marcação de lido
-                    if (window.WWebJS && typeof window.WWebJS.sendSeen === 'function') {
-                        await Promise.race([
-                            window.WWebJS.sendSeen(chatId),
-                            new Promise(resolve => setTimeout(resolve, 2000)) // Trava de 2s pra evitar Runtime.callFunctionOn timed out do Puppeteer
-                        ]);
-                    }
-
-                    // Fallback visual extremo: Tenta clicar no chat na lista lateral se a bolinha ainda existir
-                    // O formato do chatId no DOM costuma ter o número ou ID parcial
-                    setTimeout(() => {
-                        const unreadBadges = document.querySelectorAll('span[aria-label*="não lida"], span[aria-label*="unread"]');
-                        unreadBadges.forEach(badge => {
-                            // Se a div pai deste badge tiver o número do contato, clica nela para forçar a leitura
-                            const chatRow = badge.closest('[role="listitem"]');
-                            if (chatRow && chatRow.innerHTML.includes(chatId.split('@')[0])) {
-                                chatRow.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-                                chatRow.click();
-                            }
-                        });
-                    }, 500); // Aguarda meio segundo pro React atualizar o DOM
-
-                } catch (e) {
-                    // Ignora silenciosamente
-                }
-            }, contactId);
-        } catch (e) {
-            logger.warn(session.accountName, `⚠️ Falha ao forçar bolinha verde para lido: ${e.message}`);
-        }
+        // Legado do WWebJS - A marcação de lido (Blue Tick/Mic)
+        // agora é gerida internamente pelo fluxo padrão do Baileys (readMessages usando MsgKey).
+        return;
     }
 
     /**
@@ -675,99 +644,10 @@ class MessageHandler {
                 // [4/6] Marca o áudio como "played" → ícone do player fica AZUL para quem enviou
                 logger.info(session.accountName, `🔵 [4/6] Marcando áudio como ouvido (player azul)...`);
                 try {
-                    const msgId = message.id?._serialized || message._data?.id?._serialized;
-                    if (msgId && session.client?.pupPage) {
-                        const playedResult = await session.client.pupPage.evaluate(async (serializedMsgId) => {
-                            try {
-                                const S = window.Store;
-                                const msg = S.Msg.get(serializedMsgId);
-                                if (!msg) return 'NO_MSG';
-
-                                const remoteJid = typeof msg.id.remote === 'object'
-                                    ? msg.id.remote._serialized : String(msg.id.remote);
-                                const msgServerId = msg.id.id;
-
-                                // === 1) Store.Socket (WADeprecatedSendIq) — dump imediato de todas as fns ===
-                                // Não tenta chamar nada — só retorna o que existe para diagnóstico rápido
-                                try {
-                                    const socketMod = window.Store.Socket || window.require('WADeprecatedSendIq');
-                                    if (socketMod) {
-                                        const allSocketFns = Object.keys(socketMod);
-                                        // Procura funções relevantes para receipt/played
-                                        const receiptFns = allSocketFns.filter(k => {
-                                            const fl = k.toLowerCase();
-                                            return fl.includes('receipt') || fl.includes('played') ||
-                                                fl.includes('ack') || fl.includes('read') || fl.includes('seen');
-                                        });
-                                        if (receiptFns.length > 0) {
-                                            // Tenta apenas funções de receipt
-                                            for (const fn of receiptFns) {
-                                                if (typeof socketMod[fn] !== 'function') continue;
-                                                try {
-                                                    const { makeWapNode } = window.require('WAWap');
-                                                    const node = makeWapNode('receipt', {
-                                                        type: 'played', id: msgServerId, to: remoteJid,
-                                                        t: String(Math.floor(Date.now() / 1000))
-                                                    }, null);
-                                                    const r = socketMod[fn](node);
-                                                    if (r && typeof r.then === 'function') {
-                                                        await Promise.race([r, new Promise(res => setTimeout(res, 3000))]);
-                                                    }
-                                                    return 'OK:Socket.' + fn;
-                                                } catch (_) { }
-                                            }
-                                            return 'SOCKET_RECEIPT_FNS:' + receiptFns.join(',');
-                                        }
-                                        // Sem receipt fns — retorna TODAS as fns para diagnóstico
-                                        return 'SOCKET_ALL_FNS:' + allSocketFns.join(',');
-                                    }
-                                } catch (_) { }
-
-                                // === 2) Chunk scan limitado — só 1 chunk, max 100 módulos ===
-                                try {
-                                    const registry = window.webpackChunkwhatsapp_web_client;
-                                    if (registry && registry.length) {
-                                        let scanned = 0;
-                                        outer: for (const chunk of registry) {
-                                            const mods = chunk[1] || {};
-                                            for (const modId of Object.keys(mods)) {
-                                                if (++scanned > 100) break outer;
-                                                try {
-                                                    const m = window.require(modId);
-                                                    if (!m || typeof m !== 'object') continue;
-                                                    const playedFns = Object.keys(m).filter(k =>
-                                                        k.toLowerCase().includes('played') && typeof m[k] === 'function'
-                                                    );
-                                                    if (playedFns.length > 0) {
-                                                        return 'CHUNK_FOUND:' + modId + ':' + playedFns.join(',');
-                                                    }
-                                                } catch (_) { }
-                                            }
-                                        }
-                                        return 'CHUNK_100_DONE:NO_PLAYED';
-                                    }
-                                } catch (chunkErr) {
-                                    return 'CHUNK_ERR:' + chunkErr.message;
-                                }
-
-                                return 'ALL_FAILED';
-                            } catch (e) {
-                                return 'exception:' + e.message;
-                            }
-                        }, msgId);
-
-                        // Log do resultado para diagnóstico
-                        if (playedResult?.startsWith('OK:')) {
-                            logger.info(session.accountName, `✅ [4/6] Player azul enviado — ${playedResult}`);
-                        } else {
-                            logger.warn(session.accountName, `🔍 [4/6] Diagnóstico played: ${playedResult}`);
-                        }
-                    } else {
-                        await session.client.readMessages([msg.key]);
-                        logger.warn(session.accountName, `⚠️ pupPage indisponível — fallback sendSeen`);
-                    }
-                } catch (playedErr) {
-                    logger.warn(session.accountName, `⚠️ Erro ao marcar áudio como played: ${playedErr.message}`);
+                    await session.client.readMessages([message.key]);
+                    logger.info(session.accountName, `✅ Áudio marcado como lido (Blue Mic) nativamente.`);
+                } catch (playErr) {
+                    logger.warn(session.accountName, `⚠️ Falha ao macar played: ${playErr.message}`);
                 }
 
             } else {
@@ -1347,49 +1227,9 @@ class MessageHandler {
      * Processa mensagens não lidas na inicialização (pendentes offline)
      */
     async processUnreadMessages(session) {
-        try {
-            logger.info(session.accountName, 'Buscando chats com mensagens não lidas...');
-            // Pode demorar um pouco dependendo da quantidade de conversas no aparelho
-            const chats = await session.client.getChats();
-            const unreadChats = chats.filter(c => c.unreadCount > 0);
-
-            if (unreadChats.length === 0) {
-                logger.info(session.accountName, 'Nenhuma mensagem pendente encontrada.');
-                return;
-            }
-
-            logger.info(session.accountName, `Encontrado(s) ${unreadChats.length} chat(s) com mensagens não lidas. Iniciando Queue Handler...`);
-
-            // Garante a ordem histórica (Mais antigas primeiro) para não deixar atrasados no fundo da fila
-            for (const chat of unreadChats.reverse()) {
-                try {
-                    // Buscar um RANGE MAIOR de mensagens (buffer +5) porque limit igual ao unreadCount falha se houverem msgs deletadas ou do sistema misturadas
-                    const messages = await chat.fetchMessages({ limit: Math.max(15, chat.unreadCount + 5) });
-                    logger.info(session.accountName, `Chat ${chat.id.user}: ${chat.unreadCount} unread. fetched ${messages ? messages.length : 0} msgs.`);
-
-                    if (messages && messages.length > 0) {
-                        // Varre do mais recente pro mais antigo procurando a Última Mensagem Válida (que o Cliente nos Enviou)
-                        const SYSTEM_TYPES = ['e2e_notification', 'notification_template', 'notification', 'call_log', 'protocol', 'gp2'];
-                        const validMsgs = messages.filter(m => !m.fromMe && !SYSTEM_TYPES.includes(m.type));
-
-                        if (validMsgs.length > 0) {
-                            const lastUserMsg = validMsgs[validMsgs.length - 1]; // Pega a última na ordem cronológica (a mais nova que ele mandou)
-
-                            // Adiciona ela à Queue Oficial sinalizando ser Histórico
-                            logger.info(session.accountName, `=> Alvo Resgatado ID: ${lastUserMsg.id.id} | Timestamp: ${lastUserMsg.timestamp}`);
-                            await this.handleMessage(session, lastUserMsg, true);
-                        } else {
-                            logger.warn(session.accountName, `Chat ${chat.id.user} marcado como unread, mas nehuma mensagem válida de usuário encontrada no buffer!`);
-                        }
-                    }
-                } catch (err) {
-                    logger.error(session.accountName, `Erro ao processar chat pendente ${chat.id.user}: ${err.message}`);
-                }
-            }
-            logger.success(session.accountName, 'Envio para Queue de pendências concluído com sucesso!');
-        } catch (error) {
-            logger.error(session.accountName, `Erro ao buscar chats pendentes: ${error.message}`);
-        }
+        // Obsoleto. Em Baileys/WebSockets as msgs offline 
+        // são baixadas e roteadas nativamente via messages.upsert
+        return;
     }
 
     /**

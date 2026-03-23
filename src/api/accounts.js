@@ -102,16 +102,19 @@ router.get('/:id/debug-chats', async (req, res) => {
         if (!session || session.status !== 'ready' || !session.client) {
             return res.json({ error: 'Sessão não pronta', status: session?.status });
         }
-        const chats = await session.client.getChats();
-        const sample = chats.slice(0, 15).map(c => ({
-            isGroup: c.isGroup,
-            isBroadcast: c.isBroadcast,
-            idServer: c.id?.server,
-            idUser: c.id?.user,
-            name: c.name,
-            serialized: c.id?._serialized
-        }));
-        res.json({ total: chats.length, sample });
+        const rawChats = Object.values(session.store?.chats || {});
+        const sample = rawChats.slice(0, 15).map(c => {
+            const isGroup = c.id?.endsWith('@g.us');
+            return {
+                isGroup,
+                isBroadcast: c.id?.includes('broadcast'),
+                idServer: c.id?.split('@')[1],
+                idUser: c.id?.split('@')[0],
+                name: c.name || session.store?.contacts?.[c.id]?.name || c.id,
+                serialized: c.id
+            };
+        });
+        res.json({ total: rawChats.length, sample });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -128,10 +131,18 @@ router.get('/:id/unsaved-vcard', async (req, res) => {
             return res.status(400).send('Sessão do WhatsApp não está pronta. Conecte a conta primeiro.');
         }
 
-        const chats = await session.client.getChats();
-
-        // Filtra chats privados (nao grupos, nao broadcast)
-        const privateChats = chats.filter(chat => !chat.isGroup && chat.id && !chat.id._serialized?.includes('broadcast'));
+        const rawChats = Object.values(session.store?.chats || {});
+        const privateChats = rawChats.filter(chat => {
+            const jid = chat.id;
+            return jid && !jid.endsWith('@g.us') && !jid.includes('broadcast');
+        }).map(chat => {
+            const contact = session.store?.contacts?.[chat.id] || {};
+            return {
+                id: { _serialized: chat.id },
+                name: contact.name || contact.notify || chat.name || chat.id.split('@')[0],
+                isGroup: false
+            };
+        });
 
         const exportList = [];
         const seen = new Set();
@@ -770,14 +781,17 @@ router.get('/:id/groups', async (req, res) => {
             return res.status(400).json({ error: 'Sessão não está ativa' });
         }
 
-        const chats = await session.client.getChats();
-        const groups = chats
-            .filter(c => c.isGroup)
-            .map(c => ({
-                jid: c.id._serialized,
-                name: c.name || 'Grupo sem nome',
-                participants: c.participants ? c.participants.length : 0
-            }))
+        const rawChats = Object.values(session.store?.chats || {});
+        const groups = rawChats
+            .filter(c => c.id?.endsWith('@g.us'))
+            .map(c => {
+                const groupMetadata = session.store?.groupMetadata?.[c.id] || {};
+                return {
+                    jid: c.id,
+                    name: c.name || groupMetadata.subject || 'Grupo sem nome',
+                    participants: groupMetadata.participants ? groupMetadata.participants.length : 0
+                };
+            })
             .sort((a, b) => a.name.localeCompare(b.name));
 
         res.json(groups);
