@@ -269,6 +269,18 @@ class DatabaseManager {
           )
       `);
 
+      // Tabela de Autenticação do Baileys (Chaves criptográficas OMEMO)
+      await client.query(`
+          CREATE TABLE IF NOT EXISTS baileys_auth (
+              id SERIAL PRIMARY KEY,
+              account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+              key_id TEXT NOT NULL,
+              data TEXT,
+              created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(account_id, key_id)
+          )
+      `);
+
       console.log('✅ Database tables initialized (PostgreSQL)');
     } catch (error) {
       console.error('❌ Error initializing tables:', error);

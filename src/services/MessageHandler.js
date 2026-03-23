@@ -1,4 +1,4 @@
-const { MessageMedia } = require('whatsapp-web.js');
+// Refatorado para Baileys
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -56,99 +56,7 @@ function convertToOggOpus(inputPath) {
     });
 }
 
-/**
- * Envia áudio OGG/Opus como PTT (nota de voz) via Puppeteer.
- * Injeta diretamente no WhatsApp Web sem usar sendAudioAsVoice,
- * contornando o problema do AudioContext no Chromium headless sem WebRTC.
- */
-async function sendPTTViaPuppeteer(session, contactId, base64Audio, mimeType, filename) {
-    try {
-        const result = await session.client.pupPage.evaluate(async (chatId, b64, mime, fname) => {
-            try {
-                const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
-                if (!chat) return { ok: false, err: 'chat not found' };
-
-                // Cria o File a partir do base64
-                const bin = atob(b64);
-                const arr = new Uint8Array(bin.length);
-                for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-                const blob = new Blob([arr], { type: mime });
-                const file = new File([blob], fname, { type: mime, lastModified: Date.now() });
-
-                // Processa como mídia com isPtt=true
-                const opaqueData = await window.Store.OpaqueData.createFromData(file, mime);
-                const mediaPrep = window.Store.MediaPrep.prepRawMedia(opaqueData, { isPtt: true });
-                const mediaData = await mediaPrep.waitForPrep();
-
-                // Gera waveform vazia (evita AudioContext que falha sem WebRTC)
-                mediaData.waveform = new Uint8Array(64).fill(0);
-
-                if (!(mediaData.mediaBlob instanceof window.Store.OpaqueData)) {
-                    mediaData.mediaBlob = await window.Store.OpaqueData.createFromData(
-                        mediaData.mediaBlob, mediaData.mediaBlob.type
-                    );
-                }
-                mediaData.renderableUrl = mediaData.mediaBlob.url();
-
-                const mediaObject = window.Store.MediaObject.getOrCreateMediaObject(mediaData.filehash);
-                const mediaType = window.Store.MediaTypes.msgToMediaType({ type: mediaData.type, isGif: false });
-                mediaObject.consolidate(mediaData.toJSON());
-                mediaData.mediaBlob.autorelease();
-
-                const uploadedMedia = await window.Store.MediaUpload.uploadMedia({
-                    mimetype: mediaData.mimetype,
-                    mediaObject,
-                    mediaType
-                });
-
-                const entry = uploadedMedia?.mediaEntry;
-                if (!entry) return { ok: false, err: 'upload failed' };
-
-                mediaData.set({
-                    clientUrl: entry.mmsUrl,
-                    deprecatedMms3Url: entry.deprecatedMms3Url,
-                    directPath: entry.directPath,
-                    mediaKey: entry.mediaKey,
-                    mediaKeyTimestamp: entry.mediaKeyTimestamp,
-                    filehash: mediaObject.filehash,
-                    encFilehash: entry.encFilehash,
-                    uploadhash: entry.uploadHash,
-                    size: mediaObject.size,
-                    streamingSidecar: entry.sidecar,
-                });
-
-                const from = window.Store.User.getMaybeMePnUser();
-                const newId = await window.Store.MsgKey.newId();
-                const ephemeral = window.Store.EphemeralFields.getEphemeralFields(chat);
-                const mediaJson = mediaData.toJSON ? mediaData.toJSON() : {};
-                const msg = {
-                    ...ephemeral,
-                    id: new window.Store.MsgKey({ from, to: chat.id, id: newId, selfDir: 'out' }),
-                    ack: 0,
-                    body: '',
-                    from,
-                    to: chat.id,
-                    local: true,
-                    self: 'out',
-                    t: Math.floor(Date.now() / 1000),
-                    isNewMsg: true,
-                    ...mediaJson,
-                    // FORÇAR tipo PTT — prepRawMedia pode retornar 'audio' em Chromium headless
-                    type: 'ptt',
-                };
-
-                await window.Store.SendMessage.addAndSendMsgToChat(chat, msg);
-                return { ok: true };
-            } catch (e) {
-                return { ok: false, err: e.message };
-            }
-        }, contactId, base64Audio, mimeType, filename);
-
-        return result;
-    } catch (e) {
-        return { ok: false, err: e.message };
-    }
-}
+// sendPTTViaPuppeteer Removido - O Baileys envia arquivos diretamente nativos via Sockets!
 
 /**
  * Gerenciador de mensagens com comportamento humano (versão dinâmica)
@@ -520,7 +428,7 @@ class MessageHandler {
         if (lastTime) {
             const config = this.getAccountConfig(session);
             const timeSince = Date.now() - lastTime;
-            const isGroup = contactId.includes('@g.us');
+            
             const interactionCount = this.interactions.get(contactId) || 0;
             const isFirstInteraction = interactionCount === 0;
 
@@ -567,7 +475,7 @@ class MessageHandler {
                 try {
                     const contact = await message.getContact();
                     if (contact && contact.isMyContact === false) {
-                        const pushname = contact.pushname || contact.name || 'Novo Lead';
+                        const pushname = (contact.notify || contact.name) || contact.name || 'Novo Lead';
                         // salva o contato no banco usando phoneNumber formatado e nome
                         await db.saveNewContact(session.accountId, contactId, pushname);
                     }
@@ -622,7 +530,7 @@ class MessageHandler {
     async handleExitCommand(session, contactId) {
         try {
             const contact = await session.getContact(contactId);
-            const phoneNumber = contact.number;
+            const phoneNumber = (contact.id ? contact.id.split("@")[0] : contactId.split("@")[0]);
 
             // Adiciona à blacklist
             this.addToBlacklist(phoneNumber);
@@ -636,7 +544,7 @@ class MessageHandler {
             logger.behavior(session.accountName, 'Delay de digitação', formatDelay(behavior.typingDelay));
             await delay(behavior.typingDelay);
 
-            await session.sendMessage(contactId, '🛞 OBGD, A SPACE TIRE AGRADECE! 🛞');
+            await session.client.sendMessage(contactId, { text: '🛞 OBGD, A SPACE TIRE AGRADECE! 🛞' });
             logger.messageSent(session.accountName, contactId, 'Despedida');
 
         } catch (error) {
@@ -651,7 +559,7 @@ class MessageHandler {
         try {
             const config = this.getAccountConfig(session);
             const chat = await session.getChat(contactId);
-            const isGroup = contactId.includes('@g.us');
+            
 
             // Obtém nome do contato/grupo
             let name = 'Cliente';
@@ -659,7 +567,7 @@ class MessageHandler {
                 name = chat.name || 'Grupo';
             } else {
                 const contact = await session.getContact(contactId);
-                name = contact.pushname || contact.name || 'Cliente';
+                name = (contact.notify || contact.name) || contact.name || 'Cliente';
             }
 
             logger.messageReceived(session.accountName, name, isGroup);
@@ -855,7 +763,7 @@ class MessageHandler {
                             logger.warn(session.accountName, `🔍 [4/6] Diagnóstico played: ${playedResult}`);
                         }
                     } else {
-                        await chat.sendSeen();
+                        await session.client.readMessages([msg.key]);
                         logger.warn(session.accountName, `⚠️ pupPage indisponível — fallback sendSeen`);
                     }
                 } catch (playedErr) {
@@ -962,7 +870,7 @@ class MessageHandler {
             } else {
                 const preview = responseText.length > 60 ? responseText.substring(0, 60) + '...' : responseText;
                 logger.info(session.accountName, `📤 Tipo: Texto — "${preview}"`);
-                await session.sendMessage(contactId, responseText);
+                await session.client.sendMessage(contactId, { text: responseText });
                 logger.info(session.accountName, `✅ Mensagem de texto enviada para ${name}`);
                 // Registra stat de texto (privado ou grupo) — sem duplicar messages_sent (o evento message:sent já faz isso)
                 const textCol = isGroup ? 'group_text' : 'priv_text';
@@ -1132,28 +1040,31 @@ class MessageHandler {
             }
 
             if (isAudio && finalMimetype === 'audio/ogg; codecs=opus') {
-                // Envia como nota de voz (PTT) via sendAudioAsVoice:true
-                // Isso mostra a foto de perfil como se fosse gravado diretamente no WhatsApp
-                logger.info(session.accountName, `🎙️ Enviando PTT com foto de perfil (sendAudioAsVoice)...`);
-                const media = new MessageMedia(finalMimetype, base64Data, dynamicName);
+                // Envia como nota de voz (PTT) nativo
+                logger.info(session.accountName, `🎙️ Enviando PTT com foto de perfil...`);
                 try {
-                    await session.client.sendMessage(contactId, media, { sendAudioAsVoice: true });
+                    await session.client.sendMessage(contactId, { audio: sendBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
                     logger.info(session.accountName, `✅ PTT enviado com sucesso (nota de voz com foto de perfil)`);
                 } catch (pttErr) {
-                    logger.warn(session.accountName, `⚠️ Falha sendAudioAsVoice (${pttErr.message}) — tentando via Puppeteer...`);
-                    // Fallback: injeção via Puppeteer
-                    const pttResult = await sendPTTViaPuppeteer(session, contactId, base64Data, finalMimetype, dynamicName);
-                    if (pttResult?.ok) {
-                        logger.info(session.accountName, `✅ PTT enviado via Puppeteer (fallback)`);
-                    } else {
-                        logger.warn(session.accountName, `⚠️ PTT Puppeteer também falhou (${pttResult?.err}) — enviando como áudio normal`);
-                        const mediaFallback = new MessageMedia(finalMimetype, base64Data, dynamicName);
-                        await session.client.sendMessage(contactId, mediaFallback);
-                    }
+                    logger.warn(session.accountName, `⚠️ Falha ao enviar Áudio Nativo (${pttErr.message})`);
                 }
             } else {
-                const media = new MessageMedia(finalMimetype, base64Data, dynamicName);
-                await session.client.sendMessage(contactId, media, sendOptions);
+                const msgContent = {};
+                if (ext === '.webp') {
+                    msgContent.sticker = sendBuffer;
+                    msgContent.mimetype = finalMimetype;
+                } else if (isAudio) {
+                    msgContent.audio = sendBuffer;
+                    msgContent.mimetype = finalMimetype;
+                } else if (ext === '.mp4') {
+                    msgContent.video = sendBuffer;
+                    msgContent.mimetype = finalMimetype;
+                } else {
+                    msgContent.image = sendBuffer;
+                    msgContent.mimetype = finalMimetype;
+                    msgContent.fileName = dynamicName;
+                }
+                await session.client.sendMessage(contactId, msgContent);
             }
 
             session.stats.messagesSent++;
@@ -1214,8 +1125,14 @@ class MessageHandler {
             if (ext === '.vcf') {
                 // Envia como vCard
                 const vcfContent = fs.readFileSync(filePath, 'utf8');
-                const vcard = new MessageMedia('text/vcard', Buffer.from(vcfContent).toString('base64'), chosen.name);
-                await session.client.sendMessage(contactId, vcard);
+                
+                await session.client.sendMessage(contactId, {
+                    contacts: {
+                        displayName: chosen.name.replace('.vcf', ''),
+                        contacts: [{ vcard: vcfContent }]
+                    }
+                });
+                
                 session.stats.messagesSent++;
                 session.stats.lastActivity = Date.now();
                 session.emit('message:sent');
@@ -1236,10 +1153,8 @@ class MessageHandler {
                     '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
                 };
                 const mimetype = mimeMap[ext] || 'application/octet-stream';
-                const base64Data = fileBuffer.toString('base64');
 
-                const media = new MessageMedia(mimetype, base64Data, `doc_${Date.now()}${ext}`);
-                await session.client.sendMessage(contactId, media, { sendMediaAsDocument: true });
+                await session.client.sendMessage(contactId, { document: fileBuffer, mimetype, fileName: chosen.name });
                 session.stats.messagesSent++;
                 session.stats.lastActivity = Date.now();
                 session.emit('message:sent');
@@ -1400,7 +1315,7 @@ class MessageHandler {
                         }
 
                         try {
-                            await session.sendMessage(targetPhone, warmText);
+                            await session.client.sendMessage(targetPhone, { text: warmText });
                             logger.success(session.accountName, `🔥 Mensagem de aquecimento enviada para ${target.accountName}`);
                             // Atualiza lastReceivedTime para não disparar de novo imediatamente
                             this.lastReceivedTime.set(session.accountId, Date.now());
