@@ -1,5 +1,5 @@
 const EventEmitter = require('events');
-const { makeWASocket, DisconnectReason, Browsers, fetchLatestBaileysVersion, makeInMemoryStore, isJidGroup } = require('@whiskeysockets/baileys');
+const { makeWASocket, DisconnectReason, Browsers, fetchLatestBaileysVersion, isJidGroup } = require('@whiskeysockets/baileys');
 const usePostgresAuthState = require('./PostgresBaileysAuth');
 const dbManager = require('../database/DatabaseManager');
 const logger = require('../utils/logger');
@@ -9,8 +9,32 @@ const MessageHandler = require('./MessageHandler');
 // Fila global para inicialização suave, evitando saltos de IO no banco
 let globalInitPromise = Promise.resolve();
 
-// Stores em memória para buscar contatos (nome, foto) sem sobrecarregar a rede
-const memoryStores = {};
+// Cache local superleve p/ manter compatibilidade com rotas frontend (/vcard, /groups)
+function createSimpleStore() {
+    return {
+        chats: {},
+        contacts: {},
+        groupMetadata: {},
+        bind: function(ev) {
+            ev.on('chats.set', ({ chats }) => {
+                for (const c of chats) this.chats[c.id] = c;
+            });
+            ev.on('chats.upsert', chats => {
+                for (const c of chats) this.chats[c.id] = { ...(this.chats[c.id] || {}), ...c };
+            });
+            ev.on('contacts.upsert', contacts => {
+                for (const c of contacts) this.contacts[c.id] = { ...(this.contacts[c.id] || {}), ...c };
+            });
+            ev.on('messaging-history.set', ({ chats, contacts }) => {
+                for (const c of chats) this.chats[c.id] = c;
+                for (const c of contacts) this.contacts[c.id] = c;
+            });
+            ev.on('groups.upsert', groups => {
+                for (const g of groups) this.groupMetadata[g.id] = g;
+            });
+        }
+    };
+}
 
 class WhatsAppSession extends EventEmitter {
     constructor(account) {
@@ -123,12 +147,10 @@ class WhatsAppSession extends EventEmitter {
     }
 
     async _connectBaileys() {
-        // Pega ou cria a Store In-Memory
-        if (!memoryStores[this.accountId]) {
-            memoryStores[this.accountId] = makeInMemoryStore({});
-            // ideal: bind interval to save to file, but we won't right now to save RAM
+        // STORE CUSTOMIZADO: Inicializa e reconecta o micro store de Contatos e Chats p/ UI
+        if (!this.store) {
+            this.store = createSimpleStore();
         }
-        this.store = memoryStores[this.accountId];
 
         const agent = await this.getProxyAgent();
         const { state, saveCreds, clearState } = await usePostgresAuthState(this.accountId, dbManager);
