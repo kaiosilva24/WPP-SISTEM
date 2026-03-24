@@ -5,6 +5,7 @@ const dbManager = require('../database/DatabaseManager');
 const logger = require('../utils/logger');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const MessageHandler = require('./MessageHandler');
+const axios = require('axios');
 
 // Fila global para inicialização suave, evitando saltos de IO no banco
 let globalInitPromise = Promise.resolve();
@@ -212,6 +213,27 @@ class WhatsAppSession extends EventEmitter {
             
             if (connection === 'open') {
                 logger.info(this.accountName, `✅ Conectado via WebSocket Puro! (0% RAM/CPU do Chrome)🎉`);
+                
+                // Validação e Print do IP/Provedor
+                (async () => {
+                    try {
+                        let agent = undefined;
+                        if (this.proxyConfig) {
+                            agent = new HttpsProxyAgent(`http://${this.proxyConfig.host}:${this.proxyConfig.port}`);
+                        }
+                        const res = await axios.get('http://ip-api.com/json/', {
+                            httpAgent: agent,
+                            httpsAgent: agent,
+                            timeout: 10000
+                        });
+                        if (res.data && res.data.query) {
+                            logger.info(this.accountName, `🌐 ISP WhatsApp Conectado via: ${res.data.query} (Provedor: ${res.data.isp})`);
+                        }
+                    } catch (err) {
+                        logger.warn(this.accountName, `🌐 ISP WhatsApp: Não foi possível obter provedor via IP-API (${err.message}).`);
+                    }
+                })();
+
                 this.status = 'ready';
                 this.isPaused = false;
                 this._reconnectAttempts = 0;

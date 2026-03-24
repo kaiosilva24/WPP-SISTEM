@@ -298,12 +298,30 @@ class SchedulerManager {
             logger.info('Scheduler', `[${accountName}] Acionando Webhook IP Change (${hook.name})... Aguardando até 60s pelo bloqueio 4G.`);
 
             const method = hook.method ? hook.method.toUpperCase() : 'GET';
-            await axios({
-                method: method,
-                url: hook.url,
-                timeout: 60000   // 60s — dispositivo móvel demora para religar dados móveis e registrar na ERB
-            });
-            logger.info('Scheduler', `[${accountName}] Webhook resolvido com sucesso (${hook.url}). Esperando IP estabilizar...`);
+            try {
+                const response = await axios({
+                    method: method,
+                    url: hook.url,
+                    timeout: 60000,   // 60s — dispositivo móvel demora para religar dados móveis e registrar na ERB
+                    validateStatus: function (status) {
+                        return status >= 200 && status < 600; // Resolve promessa para QUALQUER status, inclusive 500
+                    }
+                });
+                
+                // Se der 500, muitas vezes é porque o painel ou o dongle 4G foi resetado no meio do request e a conexão HTTP crashou no lado do router
+                if (response.status >= 400) {
+                    logger.warn('Scheduler', `[${accountName}] Webhook retornou status ${response.status}. Assumindo que o Proxy forçou a reinicialização da rede e derrubou o request.`);
+                }
+            } catch (reqErr) {
+                // Erros de timeout (ECONNABORTED) ou rede caindo (ECONNRESET) indicam que o comando possivelmente chegou e a rede desligou imediatamente.
+                if (reqErr.code === 'ECONNRESET' || reqErr.code === 'ECONNABORTED' || reqErr.message.includes('timeout')) {
+                    logger.warn('Scheduler', `[${accountName}] Webhook finalizado abruptamente (${reqErr.code || reqErr.message}). O modem 4G provavelmente desativou o sinal.`);
+                } else {
+                    throw reqErr; // Erros genuínos de DNS ou URL inválida repassamos
+                }
+            }
+
+            logger.info('Scheduler', `[${accountName}] Webhook resolvido ou forçado ao reset (${hook.url}). Esperando IP estabilizar...`);
             // Limpa flag de erro anterior se o webhook funcionou
             this.lastWebhookError.delete(accountName);
 
