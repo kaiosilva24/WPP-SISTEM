@@ -635,7 +635,13 @@ class MessageHandler {
                     await session.client.readMessages(keysToRead).catch(err => {
                         if (!err.message.includes('479')) logger.warn(session.accountName, `⚠️ Erro ack readMessages: ${err.message}`);
                     });
-                    logger.info(session.accountName, `✅ ${keysToRead.length} mensagens marcadas (tick azul)`);
+                    
+                    // Força sincronização do AppState (Para remover a bolinha verde do próprio celular do usuário)
+                    await session.client.chatModify({ markRead: true, lastMessages: [message] }, contactId).catch(err => {
+                        logger.debug(session.accountName, `Aviso chatModify (markRead): ${err.message}`);
+                    });
+                    
+                    logger.info(session.accountName, `✅ ${keysToRead.length} mensagens marcadas (tick azul) e chat marcado como lido`);
                 } catch (seenErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao marcar como lido (ignorado): ${seenErr.message}`);
                 }
@@ -691,7 +697,13 @@ class MessageHandler {
                     await session.client.readMessages(keysToRead).catch(err => {
                         if (!err.message.includes('479')) logger.warn(session.accountName, `⚠️ Erro ack readMessages: ${err.message}`);
                     });
-                    logger.info(session.accountName, `✅ ${keysToRead.length} mensagens marcadas como lidas (tick azul)`);
+                    
+                    // Força sincronização do AppState (Para remover a bolinha verde do próprio celular do usuário)
+                    await session.client.chatModify({ markRead: true, lastMessages: [message] }, contactId).catch(err => {
+                        logger.debug(session.accountName, `Aviso chatModify (markRead): ${err.message}`);
+                    });
+                    
+                    logger.info(session.accountName, `✅ ${keysToRead.length} mensagens marcadas como lidas (tick azul e chat)`);
                 } catch (seenErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao marcar como lido (ignorado): ${seenErr.message}`);
                 }
