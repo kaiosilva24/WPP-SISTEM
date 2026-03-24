@@ -247,20 +247,43 @@ class WhatsAppSession extends EventEmitter {
                 setTimeout(async () => {
                     if (this.status === 'ready' && this.store?.chats) {
                         try {
-                            const chats = Object.values(this.store.chats).filter(c => c.unreadCount > 0);
+                            const chats = Object.values(this.store.chats).filter(c => (c.unreadCount || 0) > 0);
                             if (chats.length > 0) {
-                                logger.info(this.accountName, `Buscando Backlog: Encontrados ${chats.length} chats com mensagens antigas não lidas.`);
+                                // Ordena os chats do mais antigo para o mais novo (pelo timestamp do último msg)
+                                chats.sort((a, b) => (a.conversationTimestamp || 0) - (b.conversationTimestamp || 0));
+                                logger.info(this.accountName, `Sessão ponta e Sincronizada. Iniciando varredura (Bolinhas Verdes)...`);
+                                logger.info(this.accountName, `📬 Backlog: ${chats.length} chats com mensagens não lidas. Enfileirando do mais antigo para o mais novo...`);
+                                
                                 for (const chat of chats) {
-                                    // Pega as mensagens em memória desse chat
-                                    const msgs = this.store.messages[chat.id];
+                                    // Tenta obter as mensagens em memória desse chat
+                                    const msgs = this.store.messages?.[chat.id];
                                     if (msgs && msgs.array && msgs.array.length > 0) {
-                                        // Pega a última mensagem recebida (que não foi enviada pelo bot)
-                                        const lastMsg = [...msgs.array].reverse().find(m => !m.key.fromMe);
-                                        if (lastMsg) {
-                                            await MessageHandler.handleMessage(this, lastMsg);
+                                        // Filtra apenas mensagens recebidas (não enviadas pelo bot) e ordena cronologicamente
+                                        const unreadMsgs = msgs.array
+                                            .filter(m => !m.key?.fromMe)
+                                            .sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
+                                        
+                                        if (unreadMsgs.length > 0) {
+                                            // Enfileira apenas a mensagem mais antiga do chat — a fila vai agrupá-las automaticamente
+                                            // (o campo batchedMessages lida com as demais mensagens do mesmo contato)
+                                            const oldestMsg = unreadMsgs[0];
+                                            await MessageHandler.handleMessage(this, oldestMsg, true);
+                                        }
+                                    } else {
+                                        // Fallback: não tem msgs em memória — usa a última msg do chat diretamente
+                                        if (chat.messages && chat.messages.length > 0) {
+                                            const fallbackMsgs = chat.messages
+                                                .filter(m => !m.key?.fromMe)
+                                                .sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
+                                            if (fallbackMsgs.length > 0) {
+                                                await MessageHandler.handleMessage(this, fallbackMsgs[0], true);
+                                            }
                                         }
                                     }
                                 }
+                                logger.info(this.accountName, `✅ Backlog: ${chats.length} chats enfileirados para resposta (ordem: mais antigo → mais novo).`);
+                            } else {
+                                logger.info(this.accountName, `Sessão ponta e Sincronizada. Iniciando varredura (Bolinhas Verdes)...`);
                             }
                         } catch (e) {
                             logger.warn(this.accountName, `Erro ao processar Backlog: ${e.message}`);
