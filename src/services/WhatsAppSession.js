@@ -217,10 +217,7 @@ class WhatsAppSession extends EventEmitter {
                 // Validação e Print do IP/Provedor
                 (async () => {
                     try {
-                        let agent = undefined;
-                        if (this.proxyConfig) {
-                            agent = new HttpsProxyAgent(`http://${this.proxyConfig.host}:${this.proxyConfig.port}`);
-                        }
+                        const agent = await this.getProxyAgent();
                         const res = await axios.get('http://ip-api.com/json/', {
                             httpAgent: agent,
                             httpsAgent: agent,
