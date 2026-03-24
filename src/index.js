@@ -1,5 +1,10 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
+// Força o fuso horário global da aplicação inteira para o Horário de Brasília
+// Resolve o problema de servidores nos EUA atrasando o agendamento em 3 horas
+process.env.TZ = 'America/Sao_Paulo';
+
 const logger = require('./utils/logger');
 const sessionManager = require('./services/SessionManager');
 const messageHandler = require('./services/MessageHandler');
