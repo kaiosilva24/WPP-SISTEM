@@ -290,31 +290,34 @@ class SchedulerManager {
      * Executa trigger do Webhook do modo avião
      */
     async triggerWebhook(webhookId, accountName) {
+        let hook;
         try {
-            const hook = await db.getWebhook(webhookId);
+            hook = await db.getWebhook(webhookId);
             if (!hook) return;
 
-            logger.info('Scheduler', `[${accountName}] Acionando Webhook IP Change (${hook.name})...`);
+            logger.info('Scheduler', `[${accountName}] Acionando Webhook IP Change (${hook.name})... Aguardando até 60s pelo bloqueio 4G.`);
 
             const method = hook.method ? hook.method.toUpperCase() : 'GET';
             await axios({
                 method: method,
                 url: hook.url,
-                timeout: 15000   // 15s — dispositivo pode demorar a responder
+                timeout: 60000   // 60s — dispositivo móvel demora para religar dados móveis e registrar na ERB
             });
-            logger.info('Scheduler', `[${accountName}] Webhook resolvido (${hook.url}). Esperando IP estabilizar...`);
+            logger.info('Scheduler', `[${accountName}] Webhook resolvido com sucesso (${hook.url}). Esperando IP estabilizar...`);
             // Limpa flag de erro anterior se o webhook funcionou
             this.lastWebhookError.delete(accountName);
 
-            // Aguarda alguns segundos estabilizar a rotação do IP antes de conectar o whatsapp para n derrubar QR
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            // Aguarda alguns segundos estabilizar a rotação do IP antes de conectar o whatsapp para não derrubar QR
+            await new Promise(resolve => setTimeout(resolve, 8000));
         } catch (error) {
-            // Evita spam de log: só loga erro se não logou na última checagem
-            const lastErr = this.lastWebhookError.get(accountName);
-            if (!lastErr || Date.now() - lastErr > 300000) { // Loga no máximo 1x a cada 5 min
-                logger.error('Scheduler', `[${accountName}] Falha ao acionar Webhook de troca de IP: ${error.message}`);
-                this.lastWebhookError.set(accountName, Date.now());
-            }
+            this.lastWebhookError.set(accountName, Date.now());
+            const safeUrl = hook ? hook.url.substring(0, 30) + '...' : 'Unknown';
+            const msg = `Falha Crítica no Webhook de Troca de IP (${safeUrl}): ${error.message}. Segurança anti-ban acionada: Abortando inicialização da conta para evitar rodar no IP antigo!`;
+            logger.error('Scheduler', `[${accountName}] ${msg}`);
+            
+            // ARREMESSA o erro para matar o bloco try{} principal do activateAccount(), 
+            // impedindo de chamar o session.initialize() ou createSession().
+            throw new Error(`Falha no Webhook de Proxy 4G. Conta bloqueada por segurança.`);
         }
     }
 }
