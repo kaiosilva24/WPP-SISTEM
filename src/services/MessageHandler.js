@@ -540,16 +540,17 @@ class MessageHandler {
     async processNormalMessage(session, contactId, message = {}) {
         try {
             const config = this.getAccountConfig(session);
-            const chat = await session.getChat(contactId);
-            
+            const isGroup = contactId.includes('@g.us');
 
-            // Obtém nome do contato/grupo
+            // --- Obtém nome do contato/grupo via Baileys (sem getChat/getContact) ---
             let name = 'Cliente';
             if (isGroup) {
-                name = chat.name || 'Grupo';
+                // Tenta obter nome do grupo pelo store em memória
+                const groupMeta = session.store?.groupMetadata?.[contactId];
+                name = groupMeta?.subject || 'Grupo';
             } else {
-                const contact = await session.getContact(contactId);
-                name = (contact.notify || contact.name) || contact.name || 'Cliente';
+                // pushName está disponível direto na mensagem
+                name = message.pushName || 'Cliente';
             }
 
             logger.messageReceived(session.accountName, name, isGroup);
@@ -579,7 +580,6 @@ class MessageHandler {
                 minResponse = config.min_followup_response_delay || config.min_response_delay;
                 maxResponse = config.max_followup_response_delay || config.max_response_delay;
             } else {
-                // Primeiro contato — usa delays básicos configurados
                 minRead = config.min_read_delay;
                 maxRead = config.max_read_delay;
                 minTyping = config.min_typing_delay;
@@ -602,41 +602,28 @@ class MessageHandler {
 
             logger.info(session.accountName, `📨 ${typeTag} ${name} — ${interactionLabel}`);
 
-            // Determina se é áudio (ptt = push-to-talk / nota de voz, audio = arquivo de áudio)
-            const msgType = message.type || message._data?.type || '';
-            const msgMime = message._data?.mimetype || message.mimetype || '';
-            const isAudioMessage = msgType === 'ptt' || msgType === 'audio' ||
-                msgMime.startsWith('audio/') || message.hasMedia === true && (
-                    msgMime.includes('ogg') || msgMime.includes('opus') || msgMime.includes('mpeg')
-                );
-            logger.info(session.accountName, `🔎 [Diagnóstico] type="${msgType}" mime="${msgMime}" isAudio=${isAudioMessage}`);
-
+            // Determina se é áudio (Baileys: messageType = audioMessage ou ptt no key)
+            const msgType = Object.keys(message.message || {})[0] || '';
+            const isAudioMessage = msgType === 'audioMessage' || msgType === 'pttMessage' ||
+                (msgType === 'audioMessage' && message.message?.audioMessage?.ptt);
+            logger.info(session.accountName, `🔎 [Diagnóstico] msgType="${msgType}" isAudio=${isAudioMessage}`);
 
             // --- DELAY DE LEITURA / ESCUTA ---
             if (isAudioMessage) {
-                // ================================================================
-                // FLUXO HUMANO PARA ÁUDIO:
-                // 1) Abre a conversa → delay de leitura → tick azul (sendSeen)
-                // 2) "Ouve" o áudio → delay de escuta → player fica azul (played)
-                // ================================================================
-
-                // [1/6] Abre a conversa — delay de leitura normal (simula abrir o chat com o áudio)
-                logger.info(session.accountName, `⏳ [1/6] Abrindo conversa: ${readDelaySec}s (simulando abrir o chat com o áudio)`);
+                // [1/6] Delay de leitura (simula abrir o chat com o áudio)
+                logger.info(session.accountName, `⏳ [1/6] Abrindo conversa: ${readDelaySec}s`);
                 await delay(behavior.readDelay);
 
-                // [2/6] sendSeen — tick azul de leitura (conversa aberta, áudio visto mas não ouvido ainda)
-                logger.info(session.accountName, `👁️ [2/6] Marcando conversa como aberta (tick azul)...`);
+                // [2/6] Tick azul — Baileys nativo
+                logger.info(session.accountName, `👁️ [2/6] Marcando conversa como lida (tick azul)...`);
                 try {
-                    await Promise.race([
-                        chat.sendSeen(),
-                        new Promise(res => setTimeout(res, 5000))
-                    ]);
+                    await session.client.readMessages([message.key]);
                     logger.info(session.accountName, `✅ Conversa marcada como lida (tick azul)`);
                 } catch (seenErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao marcar como lido (ignorado): ${seenErr.message}`);
                 }
 
-                // [3/6] Delay de escuta — simula ouvir o áudio
+                // [3/6] Delay de escuta
                 let minListen, maxListen;
                 if (isGroup) {
                     minListen = config.min_group_audio_listen_delay || config.min_audio_listen_delay || 5000;
@@ -649,39 +636,35 @@ class MessageHandler {
                     maxListen = config.max_audio_listen_delay || 30000;
                 }
                 const listenDelay = Math.floor(Math.random() * (maxListen - minListen) + minListen);
-                const listenSec = (listenDelay / 1000).toFixed(1);
                 const ctxLabel = isGroup ? 'Grupo' : isFirstInteraction ? '1º Contato' : 'Follow-up';
-                logger.info(session.accountName, `🎧 [3/6] Ouvindo áudio (${ctxLabel}): ${listenSec}s`);
+                logger.info(session.accountName, `🎧 [3/6] Ouvindo áudio (${ctxLabel}): ${(listenDelay/1000).toFixed(1)}s`);
                 await delay(listenDelay);
 
-                // [4/6] Marca o áudio como "played" → ícone do player fica AZUL para quem enviou
+                // [4/6] Marca áudio como "played" (player azul)
                 logger.info(session.accountName, `🔵 [4/6] Marcando áudio como ouvido (player azul)...`);
                 try {
                     await session.client.readMessages([message.key]);
                     logger.info(session.accountName, `✅ Áudio marcado como lido (Blue Mic) nativamente.`);
                 } catch (playErr) {
-                    logger.warn(session.accountName, `⚠️ Falha ao macar played: ${playErr.message}`);
+                    logger.warn(session.accountName, `⚠️ Falha ao marcar played: ${playErr.message}`);
                 }
 
             } else {
-                // Texto/imagem/figurinha etc.: delay de leitura normal
-                logger.info(session.accountName, `⏳ [1/5] Delay de leitura: ${readDelaySec}s (simulando tempo de abrir a mensagem)`);
+                // Texto/imagem/figurinha: delay de leitura normal
+                logger.info(session.accountName, `⏳ [1/5] Delay de leitura: ${readDelaySec}s`);
                 await delay(behavior.readDelay);
 
-                // --- VISUALIZANDO (TICK AZUL) ---
+                // Tick azul nativo do Baileys
                 logger.info(session.accountName, `👁️ [2/5] Visualizando mensagem — enviando tick azul...`);
                 try {
-                    await Promise.race([
-                        chat.sendSeen(),
-                        new Promise(res => setTimeout(res, 5000))
-                    ]);
+                    await session.client.readMessages([message.key]);
                     logger.info(session.accountName, `✅ Mensagem marcada como lida (tick azul enviado)`);
                 } catch (seenErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao marcar como lido (ignorado): ${seenErr.message}`);
                 }
             }
 
-            // Decide tipo de envio ANTES do delay de digitação para não digitar se for mídia
+            // Decide tipo de envio
             let mediaEnabled, mediaInterval, audioEnabled, minRecDelay, maxRecDelay;
             if (isGroup) {
                 mediaEnabled = config.group_media_enabled !== undefined ? config.group_media_enabled : config.media_enabled;
@@ -698,8 +681,8 @@ class MessageHandler {
             } else {
                 mediaEnabled = config.media_enabled;
                 mediaInterval = config.media_interval || 3;
-                audioEnabled = true; // áudio sempre permitido se arquivo existir
-                minRecDelay = 3000;  // delay de gravação padrão para primeiro contato
+                audioEnabled = true;
+                minRecDelay = 3000;
                 maxRecDelay = 8000;
             }
 
@@ -714,7 +697,6 @@ class MessageHandler {
                 docsInterval = config.followup_docs_interval || 5;
             }
             const shouldSendDoc = docsEnabled && interactionCount > 0 && interactionCount % docsInterval === 0;
-
             const willSendMedia = shouldSendMedia || shouldSendDoc;
 
             // --- DELAY DE DIGITAÇÃO (apenas para texto) ---
@@ -723,10 +705,9 @@ class MessageHandler {
             const respStep = isAudioMessage ? 5 : 4;
             const sendStep = isAudioMessage ? 6 : 5;
             if (!willSendMedia) {
-                logger.info(session.accountName, `⌨️ [${typStep}/${totalSteps}] Delay de digitação: ${typingDelaySec}s (simulando digitando...)`);
+                logger.info(session.accountName, `⌨️ [${typStep}/${totalSteps}] Digitando: ${typingDelaySec}s`);
                 try {
                     await simulateTyping(session, contactId, behavior.typingDelay);
-                    logger.info(session.accountName, `✏️ Fim da digitação`);
                 } catch (typingErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao simular digitação (ignorado): ${typingErr.message}`);
                 }
@@ -736,10 +717,8 @@ class MessageHandler {
 
             // --- DELAY DE RESPOSTA ---
             if (behavior.responseDelay > 0) {
-                logger.info(session.accountName, `⏳ [${respStep}/${totalSteps}] Delay de resposta: ${responseDelaySec}s (aguardando antes de enviar)`);
+                logger.info(session.accountName, `⏳ [${respStep}/${totalSteps}] Delay de resposta: ${responseDelaySec}s`);
                 await delay(behavior.responseDelay);
-            } else {
-                logger.info(session.accountName, `⚡ [${respStep}/${totalSteps}] Sem delay de resposta (primeiro contato)`);
             }
 
             // --- ENVIO ---
@@ -748,48 +727,37 @@ class MessageHandler {
             if (shouldSendMedia && shouldSendDoc) {
                 const triggerNumber = Math.floor(interactionCount / mediaInterval);
                 if (triggerNumber % 2 === 1) {
-                    logger.info(session.accountName, `🎥 Alternando: enviando mídia (trigger #${triggerNumber})`);
                     await this.sendRandomMedia(session, contactId, { audioEnabled, minRecDelay, maxRecDelay, isGroup });
                 } else {
-                    logger.info(session.accountName, `📄 Alternando: enviando documento (trigger #${triggerNumber})`);
                     await this.sendRandomDoc(session, contactId);
                 }
             } else if (shouldSendMedia) {
-                logger.info(session.accountName, `🎥 Tipo: Mídia (interação #${interactionCount} é múltiplo de ${mediaInterval})`);
                 await this.sendRandomMedia(session, contactId, { audioEnabled, minRecDelay, maxRecDelay, isGroup });
             } else if (shouldSendDoc) {
-                logger.info(session.accountName, `📄 Tipo: Documento/vCard (interação #${interactionCount} é múltiplo de ${docsInterval})`);
                 await this.sendRandomDoc(session, contactId);
             } else {
                 const preview = responseText.length > 60 ? responseText.substring(0, 60) + '...' : responseText;
                 logger.info(session.accountName, `📤 Tipo: Texto — "${preview}"`);
                 await session.client.sendMessage(contactId, { text: responseText });
                 logger.info(session.accountName, `✅ Mensagem de texto enviada para ${name}`);
-                // Registra stat de texto (privado ou grupo) — sem duplicar messages_sent (o evento message:sent já faz isso)
                 const textCol = isGroup ? 'group_text' : 'priv_text';
                 try { await db.updateStats(session.accountId, { [textCol]: 1 }); } catch (_) { }
             }
 
-            // Aplica Cooldown Global independentemente do tipo de mensagem enviada
+            // Cooldown e contadores
             this.applyGlobalCooldown(session, isGroup);
-
-            // Atualiza contadores
             this.interactions.set(contactId, interactionCount + 1);
             this.lastMessageTime.set(contactId, Date.now());
-
-            // Auto Aquecimento - Apenas respostas enviadas ou interações VERDADEIRAS resetam o timer.
-            // O usuário solicitou que apenas "responder no privado" zere os 10 minutos.
             if (!isGroup) {
                 this.lastReceivedTime.set(session.accountId, Date.now());
             }
 
-            // Conta respostas enviadas e verifica pausa
+            // Pausa automática
             const pauseN = config.pause_after_n_responses || 0;
             if (pauseN > 0) {
                 const prevCount = this.responseCount.get(session.accountId) || 0;
                 const newCount = prevCount + 1;
                 this.responseCount.set(session.accountId, newCount);
-
                 if (newCount >= pauseN) {
                     const durationMs = (config.pause_duration_minutes || 10) * 60 * 1000;
                     this.pauseUntil.set(session.accountId, Date.now() + durationMs);
@@ -798,10 +766,10 @@ class MessageHandler {
                 }
             }
 
-            // Atualiza estatísticas no banco
             await db.updateStats(session.accountId, {
                 unique_contacts: this.interactions.size
             });
+
 
             // Força a remoção da bolinha verde de não lido na interface para esse chat
             await this.forceMarkRead(session, contactId);
