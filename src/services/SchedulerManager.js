@@ -11,6 +11,8 @@ class SchedulerManager {
         this.POLL_INTERVAL = 60000;
         // Evita spam de log de erro de webhook — guarda última falha por conta
         this.lastWebhookError = new Map();
+        // Evita ativação simultânea da mesma conta (duplo clique na UI gerando 2 webhooks)
+        this.activatingAccounts = new Set();
     }
 
     start() {
@@ -109,6 +111,12 @@ class SchedulerManager {
      * Função auxiliar para Ativar uma Conta e disparar IP Change do Grupo Proxy.
      */
     async activateAccount(account) {
+        if (this.activatingAccounts.has(account.id)) {
+            logger.warn('Scheduler', `[${account.name}] Inicialização / disparo de webhook ignorado, já em andamento...`);
+            return;
+        }
+        this.activatingAccounts.add(account.id);
+
         const { id, name, proxy_group_id, webhook_id } = account;
 
         try {
@@ -234,6 +242,8 @@ class SchedulerManager {
                 io.emit('session:error', { accountName: name, error: error.message });
             }
             throw error; // Transmite o erro para cima, seja no /start API ou monitorSchedules()
+        } finally {
+            this.activatingAccounts.delete(account.id);
         }
     }
 
@@ -295,33 +305,31 @@ class SchedulerManager {
             hook = await db.getWebhook(webhookId);
             if (!hook) return;
 
-            logger.info('Scheduler', `[${accountName}] Acionando Webhook IP Change (${hook.name})... Aguardando até 60s pelo bloqueio 4G.`);
+            logger.info('Scheduler', `[${accountName}] Acionando Webhook IP Change (${hook.name})... Aguardando até 20s pelo bloqueio 4G.`);
 
-            const method = hook.method ? hook.method.toUpperCase() : 'GET';
+            const fetchOptions = {
+                method: hook.method ? hook.method.toUpperCase() : 'GET',
+                url: hook.url.trim(),
+                timeout: 20000 // 20s - limite razoável para o aparelho iniciar o proxy sem travar o log principal
+            };
+
             try {
-                const response = await axios({
-                    method: method,
-                    url: hook.url,
-                    timeout: 60000,   // 60s — dispositivo móvel demora para religar dados móveis e registrar na ERB
-                    validateStatus: function (status) {
-                        return status >= 200 && status < 600; // Resolve promessa para QUALQUER status, inclusive 500
-                    }
-                });
-                
-                // Se der 500, muitas vezes é porque o painel ou o dongle 4G foi resetado no meio do request e a conexão HTTP crashou no lado do router
-                if (response.status >= 400) {
-                    logger.warn('Scheduler', `[${accountName}] Webhook retornou status ${response.status}. Assumindo que o Proxy forçou a reinicialização da rede e derrubou o request.`);
-                }
+                const response = await axios(fetchOptions);
+                logger.info('Scheduler', `[${accountName}] Webhook executado com sucesso. Status HTTP: ${response.status}. Rotacionando IP!`);
             } catch (reqErr) {
                 // Erros de timeout (ECONNABORTED) ou rede caindo (ECONNRESET) indicam que o comando possivelmente chegou e a rede desligou imediatamente.
-                if (reqErr.code === 'ECONNRESET' || reqErr.code === 'ECONNABORTED' || reqErr.message.includes('timeout')) {
-                    logger.warn('Scheduler', `[${accountName}] Webhook finalizado abruptamente (${reqErr.code || reqErr.message}). O modem 4G provavelmente desativou o sinal.`);
+                if (['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'EHOSTUNREACH'].includes(reqErr.code) || reqErr.message.includes('timeout')) {
+                    logger.warn('Scheduler', `[${accountName}] Webhook finalizado (conexão caiu/timeout: ${reqErr.code || reqErr.message}). Normal ao rotacionar IP do Dongle.`);
+                } else if (reqErr.response) {
+                    // Se o proxy retornar 500 ou 400, não usamos validateStatus para disfarçar o erro HTTP no axios 
+                    // a fim de mantermos o mesmo comportamento que o disparo manual (/execute) da API de webhooks.
+                    logger.warn('Scheduler', `[${accountName}] Webhook retornou status ${reqErr.response.status}: ${JSON.stringify(reqErr.response.data || '')}`);
                 } else {
                     throw reqErr; // Erros genuínos de DNS ou URL inválida repassamos
                 }
             }
 
-            logger.info('Scheduler', `[${accountName}] Webhook resolvido ou forçado ao reset (${hook.url}). Esperando IP estabilizar...`);
+            logger.info('Scheduler', `[${accountName}] Webhook resolvido ou forçado ao reset (${hook.url.trim()}). Esperando IP estabilizar...`);
             // Limpa flag de erro anterior se o webhook funcionou
             this.lastWebhookError.delete(accountName);
 
