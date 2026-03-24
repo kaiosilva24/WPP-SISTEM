@@ -228,7 +228,7 @@ class WhatsAppSession extends EventEmitter {
             if (m.type !== 'notify') return;
             for (const msg of m.messages) {
                 try {
-                    await MessageHandler.handleMessage(msg, this);
+                    await MessageHandler.handleMessage(this, msg);
                 } catch(e) {
                     logger.error(this.accountName, `Erro processando mensagem no Handler: ${e.message}`);
                 }

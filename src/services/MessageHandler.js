@@ -420,7 +420,23 @@ class MessageHandler {
      * Enfileira ou Recusa a mensagem recebida baseando-se no Lock de Fila
      */
     async handleMessage(session, message, isHistory = false) {
-        let contactId = message.from;
+        // --- MAPEAMENTO Baileys → campos normalizados ---
+        const contactId = message.key?.remoteJid;
+        // Extrai o corpo de texto da mensagem (Baileys não tem message.body)
+        const msgBody = message.message?.conversation
+            || message.message?.extendedTextMessage?.text
+            || message.message?.imageMessage?.caption
+            || message.message?.videoMessage?.caption
+            || '';
+        // Popula message.body para compatibilidade com o restante do código
+        message.body = msgBody;
+        // Popula message.from para compatibilidade
+        message.from = contactId;
+
+        // Descarta mensagens sem JID (sistema/notificações internas)
+        if (!contactId) return;
+        // Descarta mensagens enviadas pelo próprio bot (fromMe)
+        if (message.key?.fromMe) return;
 
         try {
             // 1. Filtros Absolutos (Bots, Grupos Desativados, Próprio Número)
@@ -434,7 +450,7 @@ class MessageHandler {
             }
 
             // Verifica comando SAIR
-            if (message.body && message.body.toLowerCase().includes('sair')) {
+            if (msgBody && msgBody.toLowerCase().includes('sair')) {
                 await this.handleExitCommand(session, contactId);
                 return;
             }
@@ -443,14 +459,11 @@ class MessageHandler {
             const isGroupNow = contactId.includes('@g.us');
             if (!isGroupNow) {
                 try {
-                    const contact = await message.getContact();
-                    if (contact && contact.isMyContact === false) {
-                        const pushname = (contact.notify || contact.name) || contact.name || 'Novo Lead';
-                        // salva o contato no banco usando phoneNumber formatado e nome
-                        await db.saveNewContact(session.accountId, contactId, pushname);
-                    }
+                    // Baileys expõe pushName direto na mensagem (sem getContact())
+                    const pushname = message.pushName || 'Novo Lead';
+                    await db.saveNewContact(session.accountId, contactId, pushname);
                 } catch (contactErr) {
-                    logger.warn(session.accountName, `Erro ao obter detalhes do contato para salvar lead: ${contactErr.message}`);
+                    logger.warn(session.accountName, `Erro ao salvar lead: ${contactErr.message}`);
                 }
             }
 
@@ -472,21 +485,20 @@ class MessageHandler {
                 : queue.private.some(i => i.contactId === contactId);
 
             if (isAlreadyInQueue) {
-                // Silenciado logs massivos de sobreposição pois assustou o cliente
                 return;
             }
 
             // Loga enfileiramento com dados do Timestamp original
-            const msgTime = new Date(message.timestamp * 1000).toLocaleTimeString('pt-BR');
+            const msgTime = new Date(message.messageTimestamp * 1000).toLocaleTimeString('pt-BR');
             logger.info(session.accountName, `📦 Fila ${isGroupNow ? '[Grupo]' : '[Privado]'} - Add Msg de ${msgTime} de ${contactId}...`);
 
-            // Adiciona na Fila e Ordena cronologicamente por hora do recebimento oficial do WhastApp (Mais velho = Posição 0)
+            // Adiciona na Fila e Ordena cronologicamente
             if (isGroupNow) {
                 queue.group.push({ session, message, contactId });
-                queue.group.sort((a, b) => a.message.timestamp - b.message.timestamp);
+                queue.group.sort((a, b) => (a.message.messageTimestamp || 0) - (b.message.messageTimestamp || 0));
             } else {
                 queue.private.push({ session, message, contactId });
-                queue.private.sort((a, b) => a.message.timestamp - b.message.timestamp);
+                queue.private.sort((a, b) => (a.message.messageTimestamp || 0) - (b.message.messageTimestamp || 0));
             }
 
         } catch (error) {
