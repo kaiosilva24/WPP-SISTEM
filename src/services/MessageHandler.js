@@ -278,8 +278,19 @@ class MessageHandler {
                 }
 
                 if (itemToProcessIndex !== -1 && itemToProcess) {
-                    // Remove da fila o item selecionado
-                    queue.splice(itemToProcessIndex, 1);
+                    const contactId = itemToProcess.contactId;
+
+                    // Extrai TODOS os itens desse mesmo contato para não responder várias vezes e para limpar bolinhas verdes
+                    const pendingForContact = queue.filter(q => q.contactId === contactId);
+
+                    // Remove todos eles da fila original
+                    for (let j = queue.length - 1; j >= 0; j--) {
+                        if (queue[j].contactId === contactId) {
+                            queue.splice(j, 1);
+                        }
+                    }
+
+                    itemToProcess.batchedMessages = pendingForContact;
                     
                     // Bloqueia execução paralela
                     this.globalActivelyProcessing.add(accountId);
@@ -313,7 +324,7 @@ class MessageHandler {
      * Executa a mensagem que foi tirada da fila
      */
     async executeQueueItem(item, isGroup) {
-        const { session, message, contactId } = item;
+        const { session, message, contactId, batchedMessages } = item;
         const processingKey = `${session.accountId}_${contactId}`;
 
         try {
@@ -328,9 +339,9 @@ class MessageHandler {
             // Loga tipo da mensagem sendo desenfileirada
             const msgTypeLabel = message.type || 'chat';
             const bodyPreview = message.body ? `"${message.body.substring(0, 40)}"` : `[📲 ${msgTypeLabel}]`;
-            logger.info(session.accountName, `📥 Desenfileirando: ${bodyPreview} de ${contactId}`);
+            logger.info(session.accountName, `📥 Desenfileirando: ${bodyPreview} de ${contactId} (${batchedMessages ? batchedMessages.length : 1} msgs no chat)`);
 
-            await this.processNormalMessage(session, contactId, message);
+            await this.processNormalMessage(session, contactId, message, batchedMessages);
         } catch (error) {
             logger.error(session.accountName, `Erro ao processar mensagem da fila para ${contactId}: ${error.message}`);
         } finally {
@@ -535,7 +546,7 @@ class MessageHandler {
     /**
      * Processa mensagem normal
      */
-    async processNormalMessage(session, contactId, message = {}) {
+    async processNormalMessage(session, contactId, message, batchedMessages = []) {
         try {
             const config = this.getAccountConfig(session);
             const isGroup = contactId.includes('@g.us');
@@ -615,8 +626,16 @@ class MessageHandler {
                 // [2/6] Tick azul — Baileys nativo
                 logger.info(session.accountName, `👁️ [2/6] Marcando conversa como lida (tick azul)...`);
                 try {
-                    await session.client.readMessages([message.key]);
-                    logger.info(session.accountName, `✅ Conversa marcada como lida (tick azul)`);
+                    const keysToRead = [message.key];
+                    if (batchedMessages && batchedMessages.length > 0) {
+                        for (const b of batchedMessages) {
+                            if (b.message.key.id !== message.key.id) keysToRead.push(b.message.key);
+                        }
+                    }
+                    await session.client.readMessages(keysToRead).catch(err => {
+                        if (!err.message.includes('479')) logger.warn(session.accountName, `⚠️ Erro ack readMessages: ${err.message}`);
+                    });
+                    logger.info(session.accountName, `✅ ${keysToRead.length} mensagens marcadas (tick azul)`);
                 } catch (seenErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao marcar como lido (ignorado): ${seenErr.message}`);
                 }
@@ -641,7 +660,15 @@ class MessageHandler {
                 // [4/6] Marca áudio como "played" (player azul)
                 logger.info(session.accountName, `🔵 [4/6] Marcando áudio como ouvido (player azul)...`);
                 try {
-                    await session.client.readMessages([message.key]);
+                    const keysToRead = [message.key];
+                    if (batchedMessages && batchedMessages.length > 0) {
+                        for (const b of batchedMessages) {
+                            if (b.message.key.id !== message.key.id) keysToRead.push(b.message.key);
+                        }
+                    }
+                    await session.client.readMessages(keysToRead).catch(err => {
+                        if (!err.message.includes('479')) logger.warn(session.accountName, `⚠️ Erro ao marcar played: ${err.message}`);
+                    });
                     logger.info(session.accountName, `✅ Áudio marcado como lido (Blue Mic) nativamente.`);
                 } catch (playErr) {
                     logger.warn(session.accountName, `⚠️ Falha ao marcar played: ${playErr.message}`);
@@ -655,8 +682,16 @@ class MessageHandler {
                 // Tick azul nativo do Baileys
                 logger.info(session.accountName, `👁️ [2/5] Visualizando mensagem — enviando tick azul...`);
                 try {
-                    await session.client.readMessages([message.key]);
-                    logger.info(session.accountName, `✅ Mensagem marcada como lida (tick azul enviado)`);
+                    const keysToRead = [message.key];
+                    if (batchedMessages && batchedMessages.length > 0) {
+                        for (const b of batchedMessages) {
+                            if (b.message.key.id !== message.key.id) keysToRead.push(b.message.key);
+                        }
+                    }
+                    await session.client.readMessages(keysToRead).catch(err => {
+                        if (!err.message.includes('479')) logger.warn(session.accountName, `⚠️ Erro ack readMessages: ${err.message}`);
+                    });
+                    logger.info(session.accountName, `✅ ${keysToRead.length} mensagens marcadas como lidas (tick azul)`);
                 } catch (seenErr) {
                     logger.warn(session.accountName, `⚠️ Erro ao marcar como lido (ignorado): ${seenErr.message}`);
                 }
