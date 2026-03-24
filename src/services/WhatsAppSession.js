@@ -45,6 +45,9 @@ class WhatsAppSession extends EventEmitter {
         this.config = account;
         this.isPaused = false;
         
+        // Registra o ID mapeado ao nome para garantir Logs em tempo real via Socket.IO
+        logger.setAccountId(this.accountName, this.accountId);
+
         this.client = null; // Socket do Baileys
         this.store = null;
         
