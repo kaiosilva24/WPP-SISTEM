@@ -120,6 +120,10 @@ class SchedulerManager {
         const { id, name, proxy_group_id, webhook_id } = account;
 
         try {
+            // ── DIAGNÓSTICO: Exibe os valores que guiam a decisão do webhook ──────────────────
+            logger.info('Scheduler', `[${name}] 🔍 Diagnóstico activateAccount: webhook_id=${webhook_id ?? 'null'} | proxy_ip=${account.proxy_ip ?? 'null'} | proxy_enabled=${account.proxy_enabled}`);
+            // ─────────────────────────────────────────────────────────────────────────────────
+
             // Se a conta já tiver sessão no SessionManager e não estiver destruída, usaremos session.resume().
             // Caso contrário, sessionManager.createSession().
             const session = sessionManager.getSession(id);
@@ -181,6 +185,8 @@ class SchedulerManager {
                     logger.info('Scheduler', `[${name}] Conta sem Webhook vinculado diretamente. Herdando Webhook da conta "${peerAccount.name}" (pois dividem o Proxy ${account.proxy_ip}:${account.proxy_port}).`);
                 }
             }
+
+            logger.info('Scheduler', `[${name}] 🔍 Diagnóstico webhook: targetWebhookId=${targetWebhookId ?? 'null'} | isSessionAlreadyReady=${isSessionAlreadyReady}`);
 
             if (targetWebhookId && !isSessionAlreadyReady) {
                 if (account.proxy_ip) {
