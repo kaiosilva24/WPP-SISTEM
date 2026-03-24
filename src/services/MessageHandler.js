@@ -239,7 +239,7 @@ class MessageHandler {
         this.globalActivelyProcessing = new Set();
 
         setInterval(async () => {
-            for (const [accountId, queues] of this.globalQueue.entries()) {
+            for (const [accountId, queue] of this.globalQueue.entries()) {
                 // Checa Pausa Automática (após N respostas) da conta INTEIRA
                 const pauseEnd = this.pauseUntil.get(accountId);
                 if (pauseEnd && Date.now() < pauseEnd) {
@@ -251,55 +251,59 @@ class MessageHandler {
                     continue; // Aguarda a interação atual acabar para não parecer robô respondendo a 2 chats no mesmo segundo
                 }
 
-                let processedSomething = false;
+                if (queue.length === 0) continue;
 
-                // Tenta processar Grupo
-                if (queues.group.length > 0) {
-                    if (!this.globalGroupProcessing.has(accountId)) {
+                // Percorre a fila unificada para achar a primeira mensagem (mais antiga) 
+                // que não esteja bloqueada pelo cooldown do seu respectivo tipo (Grupo ou Privado)
+                let itemToProcessIndex = -1;
+                let itemToProcess = null;
+
+                for (let i = 0; i < queue.length; i++) {
+                    const item = queue[i];
+                    if (item.isGroup) {
                         const cooldownEnd = this.globalGroupCooldown.get(accountId);
                         if (!cooldownEnd || Date.now() >= cooldownEnd) {
-                            // Conta livre! Desenfileira e processa
-                            const item = queues.group.shift();
-                            this.globalGroupProcessing.add(accountId);
-                            this.globalActivelyProcessing.add(accountId); // Marca que está digitando
-                            processedSomething = true;
-                            // Processa de forma síncrona/segura o release do lock para não prender a fila
-                            (async () => {
-                                try {
-                                    await this.executeQueueItem(item, true);
-                                } catch (e) {
-                                    logger.error(accountId, `Erro não tratado na fila de grupos: ${e.message}`);
-                                } finally {
-                                    this.globalGroupProcessing.delete(accountId);
-                                    this.globalActivelyProcessing.delete(accountId);
-                                }
-                            })();
+                            itemToProcessIndex = i;
+                            itemToProcess = item;
+                            break;
+                        }
+                    } else {
+                        const cooldownEnd = this.globalPrivateCooldown.get(accountId);
+                        if (!cooldownEnd || Date.now() >= cooldownEnd) {
+                            itemToProcessIndex = i;
+                            itemToProcess = item;
+                            break;
                         }
                     }
                 }
 
-                // Tenta processar Privado (Apenas se não começou a processar um grupo neste mesmo segundo)
-                if (!processedSomething && queues.private.length > 0) {
-                    if (!this.globalPrivateProcessing.has(accountId)) {
-                        const cooldownEnd = this.globalPrivateCooldown.get(accountId);
-                        if (!cooldownEnd || Date.now() >= cooldownEnd) {
-                            // Conta livre! Desenfileira e processa
-                            const item = queues.private.shift();
-                            this.globalPrivateProcessing.add(accountId);
-                            this.globalActivelyProcessing.add(accountId); // Marca que está digitando
-                            // Processa de forma síncrona/segura o release do lock para não prender a fila
-                            (async () => {
-                                try {
-                                    await this.executeQueueItem(item, false);
-                                } catch (e) {
-                                    logger.error(accountId, `Erro não tratado na fila privada: ${e.message}`);
-                                } finally {
-                                    this.globalPrivateProcessing.delete(accountId);
-                                    this.globalActivelyProcessing.delete(accountId);
-                                }
-                            })();
-                        }
+                if (itemToProcessIndex !== -1 && itemToProcess) {
+                    // Remove da fila o item selecionado
+                    queue.splice(itemToProcessIndex, 1);
+                    
+                    // Bloqueia execução paralela
+                    this.globalActivelyProcessing.add(accountId);
+                    if (itemToProcess.isGroup) {
+                        this.globalGroupProcessing.add(accountId);
+                    } else {
+                        this.globalPrivateProcessing.add(accountId);
                     }
+
+                    // Processa
+                    (async () => {
+                        try {
+                            await this.executeQueueItem(itemToProcess, itemToProcess.isGroup);
+                        } catch (e) {
+                            logger.error(accountId, `Erro não tratado na fila: ${e.message}`);
+                        } finally {
+                            this.globalActivelyProcessing.delete(accountId);
+                            if (itemToProcess.isGroup) {
+                                this.globalGroupProcessing.delete(accountId);
+                            } else {
+                                this.globalPrivateProcessing.delete(accountId);
+                            }
+                        }
+                    })();
                 }
             }
         }, 5000);
@@ -401,6 +405,7 @@ class MessageHandler {
             
             const interactionCount = this.interactions.get(contactId) || 0;
             const isFirstInteraction = interactionCount === 0;
+            const isGroup = contactId.includes('@g.us');
 
             const minInterval = isGroup
                 ? (config.group_min_message_interval || 20000)
@@ -467,9 +472,9 @@ class MessageHandler {
                 }
             }
 
-            // Garante inicialização da fila para a conta
+            // Garante inicialização da fila unificada para a conta
             if (!this.globalQueue.has(session.accountId)) {
-                this.globalQueue.set(session.accountId, { private: [], group: [] });
+                this.globalQueue.set(session.accountId, []);
             }
 
             const queue = this.globalQueue.get(session.accountId);
@@ -480,9 +485,7 @@ class MessageHandler {
                 return; // Já tá sendo processado!
             }
 
-            const isAlreadyInQueue = isGroupNow
-                ? queue.group.some(i => i.contactId === contactId)
-                : queue.private.some(i => i.contactId === contactId);
+            const isAlreadyInQueue = queue.some(i => i.contactId === contactId);
 
             if (isAlreadyInQueue) {
                 return;
@@ -490,16 +493,11 @@ class MessageHandler {
 
             // Loga enfileiramento com dados do Timestamp original
             const msgTime = new Date(message.messageTimestamp * 1000).toLocaleTimeString('pt-BR');
-            logger.info(session.accountName, `📦 Fila ${isGroupNow ? '[Grupo]' : '[Privado]'} - Add Msg de ${msgTime} de ${contactId}...`);
+            logger.info(session.accountName, `📦 Fila [${isGroupNow ? 'Grupo' : 'Privado'}] - Add Msg de ${msgTime} de ${contactId}...`);
 
-            // Adiciona na Fila e Ordena cronologicamente
-            if (isGroupNow) {
-                queue.group.push({ session, message, contactId });
-                queue.group.sort((a, b) => (a.message.messageTimestamp || 0) - (b.message.messageTimestamp || 0));
-            } else {
-                queue.private.push({ session, message, contactId });
-                queue.private.sort((a, b) => (a.message.messageTimestamp || 0) - (b.message.messageTimestamp || 0));
-            }
+            // Adiciona na Fila Unificada e Ordena cronologicamente
+            queue.push({ session, message, contactId, isGroup: isGroupNow });
+            queue.sort((a, b) => (a.message.messageTimestamp || 0) - (b.message.messageTimestamp || 0));
 
         } catch (error) {
             logger.error(session.accountName, `Erro crítico ao enfileirar mensagem de ${contactId}: ${error.message}`);
