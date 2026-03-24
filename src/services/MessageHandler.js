@@ -246,10 +246,10 @@ class MessageHandler {
                     continue; // A conta inteira está pausada!
                 }
 
-                // Verifica se a conta já está "digitando/enviando" ativamente em algum lugar (Privado OU Grupo)
-                if (this.globalActivelyProcessing.has(accountId)) {
-                    continue; // Aguarda a interação atual acabar para não parecer robô respondendo a 2 chats no mesmo segundo
-                }
+                // Removemos o bloqueio global da conta inteira para permitir que Grupos e Privados
+                // sejam processados em paralelo (o humano real consegue responder a um grupo enquanto manda áudio no privado)
+                // O bloqueio agora é específico por TIPO (Grupo ou Privado)
+
 
                 if (queue.length === 0) continue;
 
@@ -261,6 +261,9 @@ class MessageHandler {
                 for (let i = 0; i < queue.length; i++) {
                     const item = queue[i];
                     if (item.isGroup) {
+                        // Se já tem um grupo processando, pula e tenta achar um privado
+                        if (this.globalGroupProcessing.has(accountId)) continue;
+                        
                         const cooldownEnd = this.globalGroupCooldown.get(accountId);
                         if (!cooldownEnd || Date.now() >= cooldownEnd) {
                             itemToProcessIndex = i;
@@ -268,6 +271,9 @@ class MessageHandler {
                             break;
                         }
                     } else {
+                        // Se já tem um privado processando, pula e tenta achar um grupo
+                        if (this.globalPrivateProcessing.has(accountId)) continue;
+                        
                         const cooldownEnd = this.globalPrivateCooldown.get(accountId);
                         if (!cooldownEnd || Date.now() >= cooldownEnd) {
                             itemToProcessIndex = i;
@@ -502,13 +508,15 @@ class MessageHandler {
                 return;
             }
 
-            // Loga enfileiramento com dados do Timestamp original
-            const msgTime = new Date(message.messageTimestamp * 1000).toLocaleTimeString('pt-BR');
+            // O timestamp no Baileys vem na raiz da estrutura WAMessage (message.messageTimestamp)
+            // Se for string casta pra number, senão usa directo. Usa 0 como default.
+            const t = message.messageTimestamp ? Number(message.messageTimestamp) : 0;
+            const msgTime = new Date(t * 1000).toLocaleTimeString('pt-BR');
             logger.info(session.accountName, `📦 Fila [${isGroupNow ? 'Grupo' : 'Privado'}] - Add Msg de ${msgTime} de ${contactId}...`);
 
             // Adiciona na Fila Unificada e Ordena cronologicamente
-            queue.push({ session, message, contactId, isGroup: isGroupNow });
-            queue.sort((a, b) => (a.message.messageTimestamp || 0) - (b.message.messageTimestamp || 0));
+            queue.push({ session, message, contactId, isGroup: isGroupNow, ts: t });
+            queue.sort((a, b) => a.ts - b.ts);
 
         } catch (error) {
             logger.error(session.accountName, `Erro crítico ao enfileirar mensagem de ${contactId}: ${error.message}`);
