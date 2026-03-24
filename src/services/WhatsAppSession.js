@@ -223,6 +223,31 @@ class WhatsAppSession extends EventEmitter {
                 
                 this.startPresenceLoop();
                 this.startStandbyLoop();
+
+                // Varredura de Backlog (Mensagens Não Lidas enquanto estava Offline)
+                setTimeout(async () => {
+                    if (this.status === 'ready' && this.store?.chats) {
+                        try {
+                            const chats = Object.values(this.store.chats).filter(c => c.unreadCount > 0);
+                            if (chats.length > 0) {
+                                logger.info(this.accountName, `Buscando Backlog: Encontrados ${chats.length} chats com mensagens antigas não lidas.`);
+                                for (const chat of chats) {
+                                    // Pega as mensagens em memória desse chat
+                                    const msgs = this.store.messages[chat.id];
+                                    if (msgs && msgs.array && msgs.array.length > 0) {
+                                        // Pega a última mensagem recebida (que não foi enviada pelo bot)
+                                        const lastMsg = [...msgs.array].reverse().find(m => !m.key.fromMe);
+                                        if (lastMsg) {
+                                            await MessageHandler.handleMessage(this, lastMsg);
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            logger.warn(this.accountName, `Erro ao processar Backlog: ${e.message}`);
+                        }
+                    }
+                }, 15000); // 15 Segundos para dar tempo de o Baileys processar o messaging-history.set
             }
         });
 
