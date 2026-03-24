@@ -161,7 +161,7 @@ class SchedulerManager {
                 }
             }
 
-            const isSessionAlreadyReady = session && (session.status === 'ready' || session.status === 'authenticated') && !session.isPaused;
+            const isSessionAlreadyReady = session && (session.status === 'ready' || session.status === 'authenticated') && !session.isPaused && session.client;
 
             if (session && session.isInitializing) {
                 logger.warn('Scheduler', `[${name}] Sessão já está em processo de inicialização. Abortando ativação simultânea para evitar colisões no Webhook do Proxy.`);

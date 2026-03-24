@@ -50,10 +50,21 @@ function setAccountId(accountName, accountId) {
 }
 
 /**
- * Formata timestamp
+ * Formata timestamp (Respeita fuso horário local)
  */
 function getTimestamp() {
-    return new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const now = new Date();
+    // Usa toLocaleString com o fuso do Brasil para ignorar a hora base UTC do servidor
+    const dateStr = now.toLocaleString('pt-BR', { 
+        timeZone: process.env.TZ || 'America/Sao_Paulo',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false
+    });
+    // Converte de DD/MM/YYYY HH:MM:SS para YYYY-MM-DD HH:MM:SS
+    const [datePortion, timePortion] = dateStr.split(' ');
+    const [d, m, y] = datePortion.split('/');
+    return `${y}-${m}-${d} ${timePortion}`;
 }
 
 /**
