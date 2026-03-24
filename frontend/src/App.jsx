@@ -2474,32 +2474,34 @@ function App() {
                                                         showToast(`${acc.name} atualizado`, 'success');
                                                         loadAccounts();
                                                     } else {
-                                                        showToast('Erro ao salvar', 'error');
+                                                        const errBody = await res.json().catch(() => ({}));
+                                                        showToast(`Erro ao salvar: ${errBody.error || res.statusText}`, 'error');
+                                                        console.error('[AutoSave] Erro HTTP:', res.status, errBody);
                                                     }
-                                                } catch { showToast('Erro de conexão', 'error'); }
+                                                } catch (e) { showToast(`Erro de conexão: ${e.message}`, 'error'); }
                                             };
 
                                             return (
                                                 <tr key={acc.id} style={{ borderBottom: '1px solid #222' }}>
                                                     <td style={{ padding: '8px', fontWeight: 'bold' }}>{acc.name}</td>
                                                     <td style={{ padding: '8px' }}>
-                                                        <select defaultValue={acc.proxy_group_id || ''} className="form-input" style={{ width: '140px', padding: '6px', fontSize: '0.8rem' }}
-                                                            onChange={(e) => autoSaveScheduleField({ proxy_group_id: e.target.value || null })}>
-                                                            <option value="">-- Nenhum --</option>
-                                                            {[...new Set([
-                                                                ...accounts.map(a => a.proxy_ip ? (a.proxy_port ? `${a.proxy_ip}:${a.proxy_port}` : a.proxy_ip) : null).filter(Boolean),
-                                                                ...accounts.map(a => a.proxy_group_id).filter(id => id && /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(id))
-                                                            ])].map(ip => (
-                                                                <option key={ip} value={ip}>{ip}</option>
-                                                            ))}
-                                                        </select>
+                                                    <select value={acc.proxy_group_id || ''} className="form-input" style={{ width: '140px', padding: '6px', fontSize: '0.8rem' }}
+                                                        onChange={(e) => autoSaveScheduleField({ proxy_group_id: e.target.value || null })}>
+                                                        <option value="">-- Nenhum --</option>
+                                                        {[...new Set([
+                                                            ...accounts.map(a => a.proxy_ip ? (a.proxy_port ? `${a.proxy_ip}:${a.proxy_port}` : a.proxy_ip) : null).filter(Boolean),
+                                                            ...accounts.map(a => a.proxy_group_id).filter(id => id && /(\d{1,3}\.){3}\d{1,3}(:\d+)?/.test(id))
+                                                        ])].map(ip => (
+                                                            <option key={ip} value={ip}>{ip}</option>
+                                                        ))}
+                                                    </select>
                                                     </td>
                                                     <td style={{ padding: '8px' }}>
-                                                        <select defaultValue={acc.webhook_id || ''} className="form-input" style={{ width: '160px', padding: '6px', fontSize: '0.8rem' }}
-                                                            onChange={(e) => autoSaveScheduleField({ webhook_id: parseInt(e.target.value) || null })}>
-                                                            <option value="">-- Nenhum --</option>
-                                                            {webhooks.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                                                        </select>
+                                                    <select value={acc.webhook_id != null ? String(acc.webhook_id) : ''} className="form-input" style={{ width: '160px', padding: '6px', fontSize: '0.8rem' }}
+                                                        onChange={(e) => autoSaveScheduleField({ webhook_id: parseInt(e.target.value) || null })}>
+                                                        <option value="">-- Nenhum --</option>
+                                                        {webhooks.map(w => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
+                                                    </select>
                                                     </td>
                                                     <td style={{ padding: '8px' }}>
                                                         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
