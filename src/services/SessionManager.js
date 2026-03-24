@@ -74,10 +74,11 @@ class SessionManager extends EventEmitter {
                 this.emit('session:authenticated', { accountId, accountName });
             });
 
-            session.on('ready', async (info) => {
-                await db.updateAccountStatus(accountId, 'ready', info.wid.user);
+            session.on('ready', async (user) => {
+                const phone = user?.id ? user.id.split(':')[0].split('@')[0] : '';
+                await db.updateAccountStatus(accountId, 'ready', phone);
                 await db.updateStats(accountId, { uptime_start: new Date().toISOString() });
-                this.emit('session:ready', { accountId, accountName, info });
+                this.emit('session:ready', { accountId, accountName, user });
             });
 
             session.on('disconnected', async (reason) => {

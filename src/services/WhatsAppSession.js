@@ -216,7 +216,7 @@ class WhatsAppSession extends EventEmitter {
                 await dbManager.updateAccountStatus(this.accountId, 'ready');
                 
                 this.emit('authenticated');
-                this.emit('ready');
+                this.emit('ready', this.client.user);
                 
                 this.startPresenceLoop();
                 this.startStandbyLoop();

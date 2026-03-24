@@ -173,7 +173,8 @@ class MessageHandler {
         const config = this.getAccountConfig(session);
 
         // Ignora mensagens do próprio número
-        if (session.client.info && contactId.startsWith(session.client.info.wid.user)) {
+        const myBasePhone = session.client?.user?.id ? session.client.user.id.split(':')[0].split('@')[0] : '';
+        if (myBasePhone && contactId.startsWith(myBasePhone)) {
             logger.messageIgnored(session.accountName, contactId, 'próprio número');
             return false;
         }
@@ -1108,9 +1109,8 @@ class MessageHandler {
                     }
 
                     const target = others[Math.floor(Math.random() * others.length)];
-                    const targetPhone = target.client && target.client.info && target.client.info.wid
-                        ? `${target.client.info.wid.user}@c.us`
-                        : null;
+                    const targetBasePhone = target.client?.user?.id ? target.client.user.id.split(':')[0].split('@')[0] : '';
+                    const targetPhone = targetBasePhone ? `${targetBasePhone}@s.whatsapp.net` : null;
 
                     if (!targetPhone) continue;
 
@@ -1159,8 +1159,6 @@ class MessageHandler {
                     }
 
                     try {
-                        const targetChat = await session.client.getChatById(targetPhone);
-
                         // Delays para simular aquecimento
                         const minTyping = config.min_followup_typing_delay || config.min_typing_delay || 5000;
                         const maxTyping = config.max_followup_typing_delay || config.max_typing_delay || 20000;
@@ -1172,15 +1170,14 @@ class MessageHandler {
 
                         logger.info(session.accountName, `👁️ [1/3] Abrindo conversa com ${target.accountName} (Auto-warm)...`);
                         try {
-                            const targetChat = await session.client.getChatById(targetPhone);
-                            await targetChat.sendSeen();
-                            await delay(Math.floor(Math.random() * 2000) + 2000); // Aguarda de 2 a 4s com chat aberto simulando ler
+                            // Marca como lido via Baileys nativo
+                            await session.client.sendPresenceUpdate('available', targetPhone);
+                            await delay(Math.floor(Math.random() * 2000) + 2000);
 
                             logger.info(session.accountName, `⌨️ [2/3] Digitando mensagem para ${target.accountName}: ${(typingTime / 1000).toFixed(1)}s`);
                             await simulateTyping(session, targetPhone, typingTime);
                         } catch (e) {
-                            // Ignorar silenciosamente erro de Detached Frame do WWebJS
-                            // logger.warn(session.accountName, `Falha ignorada na simulação visual (Auto-warm): ${e.message}`);
+                            // Ignorar silenciosamente
                         }
 
                         if (responseTime > 0) {

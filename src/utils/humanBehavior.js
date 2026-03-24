@@ -103,83 +103,52 @@ function getHumanBehaviorSequence(messageText = '') {
 }
 
 /**
- * Simula digitação gradual (envia estado de digitação em intervalos) e fica ONLINE
- * Com prevenção de timeout para chamadas Presença do wwebjs.
+ * Simula digitação gradual (envia estado de digitação em intervalos)
  */
 async function simulateTyping(session, contactId, duration) {
-    const intervals = Math.floor(duration / 3000); // A cada 3 segundos
+    if (!session?.client?.sendPresenceUpdate) return;
+    
+    // A cada 5s de digitação, envia ping (Baileys limpa automático)
+    const intervals = Math.floor(duration / 5000); 
 
-    // Helpers seguros com timeout anti-travamento de Event Loop
-    const safeExecute = async (promise, timeoutMs = 2000) => {
-        try {
-            await Promise.race([
-                promise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout WWebJS')), timeoutMs))
-            ]);
-        } catch (_) { } // Ignora silenciosamente para não quebrar a engrenagem
-    };
-
-    // Removido sendPresenceAvailable falho daqui (Movido para o WhatsAppSession)
-
-    for (let i = 0; i < intervals; i++) {
-        await safeExecute(session.client.pupPage.evaluate(chatId => {
-            window.WWebJS.sendChatstate('typing', chatId);
-        }, contactId), 2000);
-        await delay(3000);
-    }
-
-    // Delay final
-    const remaining = duration % 3000;
-    if (remaining > 0) {
-        await safeExecute(session.client.pupPage.evaluate(chatId => {
-            window.WWebJS.sendChatstate('typing', chatId);
-        }, contactId), 2000);
-        await delay(remaining);
-    }
-
-    // Para o estado de digitação explicitamente
     try {
-        await safeExecute(session.client.pupPage.evaluate(chatId => {
-            window.WWebJS.sendChatstate('stop', chatId);
-        }, contactId), 2000);
+        for (let i = 0; i < intervals; i++) {
+            await session.client.sendPresenceUpdate('composing', contactId);
+            await delay(5000);
+        }
+
+        const remaining = duration % 5000;
+        if (remaining > 0) {
+            await session.client.sendPresenceUpdate('composing', contactId);
+            await delay(remaining);
+        }
+
+        // Para o estado de digitação explicitamente
+        await session.client.sendPresenceUpdate('paused', contactId);
     } catch (_) { }
 }
 
 /**
- * Simula gravação gradual de áudio (envia estado de gravação) e fica ONLINE
+ * Simula gravação gradual de áudio (envia estado de gravação)
  */
 async function simulateRecording(session, contactId, duration) {
-    const safeExecute = async (promise, timeoutMs = 2000) => {
-        try {
-            await Promise.race([
-                promise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout WWebJS')), timeoutMs))
-            ]);
-        } catch (_) { }
-    };
-
-    // Apenas uma chamada que se segura por 25s, mas mandaremos a cada 5s para ficar seguro
+    if (!session?.client?.sendPresenceUpdate) return;
+    
     const intervals = Math.floor(duration / 5000); 
 
-    for (let i = 0; i < intervals; i++) {
-        await safeExecute(session.client.pupPage.evaluate(chatId => {
-            window.WWebJS.sendChatstate('recording', chatId);
-        }, contactId), 2000);
-        await delay(5000);
-    }
-
-    const remaining = duration % 5000;
-    if (remaining > 0) {
-        await safeExecute(session.client.pupPage.evaluate(chatId => {
-            window.WWebJS.sendChatstate('recording', chatId);
-        }, contactId), 2000);
-        await delay(remaining);
-    }
-
     try {
-        await safeExecute(session.client.pupPage.evaluate(chatId => {
-            window.WWebJS.sendChatstate('stop', chatId);
-        }, contactId), 2000);
+        for (let i = 0; i < intervals; i++) {
+            await session.client.sendPresenceUpdate('recording', contactId);
+            await delay(5000);
+        }
+
+        const remaining = duration % 5000;
+        if (remaining > 0) {
+            await session.client.sendPresenceUpdate('recording', contactId);
+            await delay(remaining);
+        }
+
+        await session.client.sendPresenceUpdate('paused', contactId);
     } catch (_) { }
 }
 
