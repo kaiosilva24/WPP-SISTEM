@@ -708,23 +708,22 @@ router.post('/:id/resume', async (req, res) => {
  */
 router.post('/:id/restart', async (req, res) => {
     try {
+        const account = await db.getAccount(req.params.id);
+        if (!account) {
+            return res.status(404).json({ error: 'Conta não encontrada' });
+        }
+        
         const session = sessionManager.getSession(req.params.id);
         if (session) {
-            console.log(`[API] Reiniciando sessão existente para conta ${req.params.id}`);
-            session.reconnect().catch(e => console.error(`[API] Erro ao reiniciar conta ${req.params.id}:`, e));
-            res.json({ message: 'Comando de reinício enviado para background' });
-        } else {
-            // Se não existe sessão, cria uma nova
-            console.log(`[API] Sessão não encontrada para reiniciar (conta ${req.params.id}), criando nova...`);
-            const account = await db.getAccount(req.params.id);
-            if (!account) {
-                return res.status(404).json({ error: 'Conta não encontrada' });
-            }
-            sessionManager.createSession(account.id, account.name, { visible: true }).catch(e => 
-                console.error(`[API] Erro ao criar conta ${req.params.id} via restart:`, e)
-            );
-            res.json({ message: 'Comando de Inicialização enviado para background' });
+            console.log(`[API] Destruindo sessão existente para Restart completo da conta ${req.params.id}`);
+            await sessionManager.destroySession(req.params.id, { intentional: true, clearAuth: false });
         }
+        
+        console.log(`[API] Solicitando inicialização (Restart) via SchedulerManager para forçar Webhook na conta ${req.params.id}`);
+        schedulerManager.activateAccount(account).catch(e => 
+            console.error(`[API] Erro ao reiniciar conta ${req.params.id} via Scheduler:`, e)
+        );
+        res.json({ message: 'Comando de Reinicialização Segura enviado para background' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
