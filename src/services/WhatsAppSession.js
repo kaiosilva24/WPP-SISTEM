@@ -232,7 +232,8 @@ class WhatsAppSession extends EventEmitter {
                 })();
 
                 this.status = 'ready';
-                this.isPaused = false;
+                // Removemos this.isPaused = false para que a conta não se "despause" sozinha
+                // caso o WebSocket caia (ex: por causa de uma rotação de proxy de outra conta) e reconecte.
                 this._reconnectAttempts = 0;
                 this.qrCode = null;
                 await dbManager.updateAccountStatus(this.accountId, 'ready');
