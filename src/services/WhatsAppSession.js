@@ -236,18 +236,20 @@ class WhatsAppSession extends EventEmitter {
                     }
                 })();
 
-                this.status = 'ready';
+                this.status = this.isPaused ? 'paused' : 'ready';
                 // Removemos this.isPaused = false para que a conta não se "despause" sozinha
                 // caso o WebSocket caia (ex: por causa de uma rotação de proxy de outra conta) e reconecte.
                 this._reconnectAttempts = 0;
                 this.qrCode = null;
-                await dbManager.updateAccountStatus(this.accountId, 'ready');
+                await dbManager.updateAccountStatus(this.accountId, this.status);
                 
                 this.emit('authenticated');
                 this.emit('ready', this.client.user);
                 
-                this.startPresenceLoop();
-                this.startStandbyLoop();
+                if (!this.isPaused) {
+                    this.startPresenceLoop();
+                    this.startStandbyLoop();
+                }
 
                 // Varredura de Backlog (Mensagens Não Lidas enquanto estava Offline)
                 setTimeout(async () => {
