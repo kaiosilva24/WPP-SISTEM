@@ -96,6 +96,11 @@ class WhatsAppSession extends EventEmitter {
         }
     }
 
+    updateConfig(newConfig) {
+        this.config = { ...this.config, ...newConfig };
+        logger.info(this.accountName, `🔄 Configuração recarregada em tempo real na sessão.`);
+    }
+
     async getProxyAgent() {
         if (!this.config.proxy_enabled || !this.config.proxy_ip || !this.config.proxy_port) {
             return undefined; // direct connection
