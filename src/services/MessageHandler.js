@@ -634,12 +634,26 @@ class MessageHandler {
                 // [2/6] Tick azul — Baileys nativo
                 logger.info(session.accountName, `👁️ [2/6] Marcando conversa como lida (tick azul)...`);
                 try {
-                    const keysToRead = [message.key];
-                    if (batchedMessages && batchedMessages.length > 0) {
-                        for (const b of batchedMessages) {
-                            if (b.message.key.id !== message.key.id) keysToRead.push(b.message.key);
+                    const buildReadKeys = (mainMsg, batched) => {
+                        const keys = [];
+                        const safeAdd = (msg) => {
+                            if (!msg || !msg.key) return;
+                            const k = { remoteJid: msg.key.remoteJid, id: msg.key.id, fromMe: msg.key.fromMe || false };
+                            if (msg.key.remoteJid?.includes('@g.us') && !msg.key.fromMe) {
+                                k.participant = msg.key.participant || msg.participant || msg.key.remoteJid;
+                            }
+                            keys.push(k);
+                        };
+                        safeAdd(mainMsg);
+                        if (batched && batched.length > 0) {
+                            for (const b of batched) {
+                                if (b.message?.key?.id !== mainMsg.key.id) safeAdd(b.message);
+                            }
                         }
-                    }
+                        return keys;
+                    };
+                    
+                    const keysToRead = buildReadKeys(message, batchedMessages);
                     await session.client.readMessages(keysToRead).catch(err => {
                         if (!err.message.includes('479')) logger.warn(session.accountName, `⚠️ Erro ack readMessages: ${err.message}`);
                     });
@@ -674,13 +688,8 @@ class MessageHandler {
                 // [4/6] Marca áudio como "played" (player azul)
                 logger.info(session.accountName, `🔵 [4/6] Marcando áudio como ouvido (player azul)...`);
                 try {
-                    const keysToRead = [message.key];
-                    if (batchedMessages && batchedMessages.length > 0) {
-                        for (const b of batchedMessages) {
-                            if (b.message.key.id !== message.key.id) keysToRead.push(b.message.key);
-                        }
-                    }
-                    await session.client.readMessages(keysToRead).catch(err => {
+                    const keysToRead2 = buildReadKeys(message, batchedMessages);
+                    await session.client.readMessages(keysToRead2).catch(err => {
                         if (!err.message.includes('479')) logger.warn(session.accountName, `⚠️ Erro ao marcar played: ${err.message}`);
                     });
                     logger.info(session.accountName, `✅ Áudio marcado como lido (Blue Mic) nativamente.`);
@@ -696,12 +705,26 @@ class MessageHandler {
                 // Tick azul nativo do Baileys
                 logger.info(session.accountName, `👁️ [2/5] Visualizando mensagem — enviando tick azul...`);
                 try {
-                    const keysToRead = [message.key];
-                    if (batchedMessages && batchedMessages.length > 0) {
-                        for (const b of batchedMessages) {
-                            if (b.message.key.id !== message.key.id) keysToRead.push(b.message.key);
+                    const buildReadKeys = (mainMsg, batched) => {
+                        const keys = [];
+                        const safeAdd = (msg) => {
+                            if (!msg || !msg.key) return;
+                            const k = { remoteJid: msg.key.remoteJid, id: msg.key.id, fromMe: msg.key.fromMe || false };
+                            if (msg.key.remoteJid?.includes('@g.us') && !msg.key.fromMe) {
+                                k.participant = msg.key.participant || msg.participant || msg.key.remoteJid;
+                            }
+                            keys.push(k);
+                        };
+                        safeAdd(mainMsg);
+                        if (batched && batched.length > 0) {
+                            for (const b of batched) {
+                                if (b.message?.key?.id !== mainMsg.key.id) safeAdd(b.message);
+                            }
                         }
-                    }
+                        return keys;
+                    };
+                    
+                    const keysToRead = buildReadKeys(message, batchedMessages);
                     await session.client.readMessages(keysToRead).catch(err => {
                         if (!err.message.includes('479')) logger.warn(session.accountName, `⚠️ Erro ack readMessages: ${err.message}`);
                     });
