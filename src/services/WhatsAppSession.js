@@ -354,17 +354,25 @@ class WhatsAppSession extends EventEmitter {
 
     async pause() {
         this.isPaused = true;
+        logger.info(this.accountName, `⏸️ Conta em PAUSA DE AQUECIMENTO (Standby). Derrubando conexão WebSocket para liberar totalmente o IP/Proxy...`);
+        await this.destroy(false);
         this.status = 'paused';
-        logger.info(this.accountName, `⏸️ Conta em PAUSA DE AQUECIMENTO (Standby).`);
         await dbManager.updateAccountStatus(this.accountId, 'paused');
     }
 
     async resume() {
         this.isPaused = false;
-        this.status = 'ready';
-        this.startPresenceLoop();
-        logger.info(this.accountName, `▶️ Conta RETOMADA! Processará filas normalmente.`);
-        await dbManager.updateAccountStatus(this.accountId, 'ready');
+        if (!this.client || this.status === 'destroyed' || this.status === 'disconnected' || this.status === 'paused') {
+            logger.info(this.accountName, `▶️ Conta RETOMADA. Subindo conexão WebSocket novamente...`);
+            this.status = 'initializing';
+            await dbManager.updateAccountStatus(this.accountId, 'initializing');
+            this.initialize();
+        } else {
+            this.status = 'ready';
+            this.startPresenceLoop();
+            logger.info(this.accountName, `▶️ Conta RETOMADA! Processará filas normalmente.`);
+            await dbManager.updateAccountStatus(this.accountId, 'ready');
+        }
     }
 
     /**
