@@ -251,54 +251,20 @@ class WhatsAppSession extends EventEmitter {
                     this.startStandbyLoop();
                 }
 
-                // Varredura de Backlog (Mensagens Não Lidas enquanto estava Offline)
-                setTimeout(async () => {
-                    if (this.status === 'ready' && this.store?.chats) {
-                        try {
-                            const chats = Object.values(this.store.chats).filter(c => (c.unreadCount || 0) > 0);
-                            if (chats.length > 0) {
-                                // Ordena os chats do mais antigo para o mais novo (pelo timestamp do último msg)
-                                chats.sort((a, b) => (a.conversationTimestamp || 0) - (b.conversationTimestamp || 0));
-                                logger.info(this.accountName, `Sessão ponta e Sincronizada. Iniciando varredura (Bolinhas Verdes)...`);
-                                logger.info(this.accountName, `📬 Backlog: ${chats.length} chats com mensagens não lidas. Enfileirando do mais antigo para o mais novo...`);
-                                
-                                for (const chat of chats) {
-                                    // Tenta obter as mensagens em memória desse chat
-                                    const msgs = this.store.messages?.[chat.id];
-                                    if (msgs && msgs.array && msgs.array.length > 0) {
-                                        // Filtra apenas mensagens recebidas (não enviadas pelo bot) e ordena cronologicamente
-                                        const unreadMsgs = msgs.array
-                                            .filter(m => !m.key?.fromMe)
-                                            .sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
-                                        
-                                        if (unreadMsgs.length > 0) {
-                                            // Enfileira apenas a mensagem mais antiga do chat — a fila vai agrupá-las automaticamente
-                                            // (o campo batchedMessages lida com as demais mensagens do mesmo contato)
-                                            const oldestMsg = unreadMsgs[0];
-                                            await MessageHandler.handleMessage(this, oldestMsg, true);
-                                        }
-                                    } else {
-                                        // Fallback: não tem msgs em memória — usa a última msg do chat diretamente
-                                        if (chat.messages && chat.messages.length > 0) {
-                                            const fallbackMsgs = chat.messages
-                                                .filter(m => !m.key?.fromMe)
-                                                .sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
-                                            if (fallbackMsgs.length > 0) {
-                                                await MessageHandler.handleMessage(this, fallbackMsgs[0], true);
-                                            }
-                                        }
-                                    }
-                                }
-                                logger.info(this.accountName, `✅ Backlog: ${chats.length} chats enfileirados para resposta (ordem: mais antigo → mais novo).`);
-                            } else {
-                                logger.info(this.accountName, `Sessão ponta e Sincronizada. Iniciando varredura (Bolinhas Verdes)...`);
-                            }
-                        } catch (e) {
-                            logger.warn(this.accountName, `Erro ao processar Backlog: ${e.message}`);
-                        }
-                    }
-                }, 15000); // 15 Segundos para dar tempo de o Baileys processar o messaging-history.set
+                // A varredura real agora acontece no evento 'messaging-history.set' ou no fallback abaixo
+                const fallbackScan = setTimeout(() => {
+                    if (!this.hasSyncedHistory) this.runBacklogScanner();
+                }, 25000); // Fallback: se o history não vier em 25s, roda a varredura mesmo assim
+                this._historyFallbackTimer = fallbackScan;
             }
+        });
+
+        // Quando o histórico offline de mensagens termina de baixar, executamos a varredura real
+        this.client.ev.on('messaging-history.set', async () => {
+            this.hasSyncedHistory = true;
+            if (this._historyFallbackTimer) clearTimeout(this._historyFallbackTimer);
+            logger.info(this.accountName, `Sincronização offline do histórico concluída. Verificando pendências...`);
+            await this.runBacklogScanner();
         });
 
         // Handlers de Mensagem
@@ -439,6 +405,40 @@ class WhatsAppSession extends EventEmitter {
     stopPresenceLoop() {
         if (this.presenceInterval) clearInterval(this.presenceInterval);
         this.presenceInterval = null;
+    }
+
+    async runBacklogScanner() {
+        if (this.status !== 'ready' || !this.store?.chats) return;
+        try {
+            const chats = Object.values(this.store.chats).filter(c => (c.unreadCount || 0) > 0);
+            if (chats.length > 0) {
+                chats.sort((a, b) => (a.conversationTimestamp || 0) - (b.conversationTimestamp || 0));
+                logger.info(this.accountName, `Sessão ponta e Sincronizada. Iniciando varredura (Bolinhas Verdes)...`);
+                logger.info(this.accountName, `📬 Backlog: ${chats.length} chats com mensagens não lidas. Enfileirando cronologicamente...`);
+                
+                for (const chat of chats) {
+                    const msgs = this.store.messages?.[chat.id];
+                    if (msgs && msgs.array && msgs.array.length > 0) {
+                        const unreadMsgs = msgs.array
+                            .filter(m => !m.key?.fromMe)
+                            .sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
+                        if (unreadMsgs.length > 0) await MessageHandler.handleMessage(this, unreadMsgs[0], true);
+                    } else {
+                        if (chat.messages && chat.messages.length > 0) {
+                            const fallbackMsgs = chat.messages
+                                .filter(m => !m.key?.fromMe)
+                                .sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
+                            if (fallbackMsgs.length > 0) await MessageHandler.handleMessage(this, fallbackMsgs[0], true);
+                        }
+                    }
+                }
+                logger.info(this.accountName, `✅ Backlog: ${chats.length} chats enfileirados para resposta.`);
+            } else {
+                logger.info(this.accountName, `Sessão ponta e Sincronizada. Nenhuma bolinha verde pendente.`);
+            }
+        } catch (e) {
+            logger.warn(this.accountName, `Erro ao processar Backlog: ${e.message}`);
+        }
     }
 
     startStandbyLoop() {
