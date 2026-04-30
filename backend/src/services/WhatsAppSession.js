@@ -10,11 +10,12 @@ const logger = require('../utils/logger');
  * Gerenciador de uma sessão WhatsApp individual (versão dinâmica)
  */
 class WhatsAppSession extends EventEmitter {
-    constructor(accountId, accountName, config) {
+    constructor(accountId, accountName, config, tenantId = null) {
         super();
 
         this.accountId = accountId;
         this.accountName = accountName;
+        this.tenantId = tenantId;
         this.client = null;
         this.status = 'disconnected';
         this.qrCode = null;
@@ -127,11 +128,18 @@ class WhatsAppSession extends EventEmitter {
             // 3. Configuração do Cliente
             const startVisible = this.runtimeOptions && this.runtimeOptions.visible;
 
+            // Isolamento por tenant: cada cliente WhatsApp em pasta separada
+            const tenantSegment = this.tenantId ? `tenant-${this.tenantId}` : 'tenant-default';
+            const dataPath = path.join(
+                process.env.HOME || process.env.USERPROFILE || '/tmp',
+                '.wwebjs_auth_aquecimento',
+                tenantSegment
+            );
+
             const clientConfig = {
                 authStrategy: new LocalAuth({
                     clientId: `account-${this.accountId}`,
-                    // Linux (DisCloud): HOME, Windows: USERPROFILE
-                    dataPath: path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.wwebjs_auth_aquecimento')
+                    dataPath: dataPath
                 }),
                 requestTimeout: 60000,
                 puppeteer: {

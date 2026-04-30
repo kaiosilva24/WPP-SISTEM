@@ -4,179 +4,167 @@ const db = require('../database/DatabaseManager');
 const logger = require('../utils/logger');
 
 /**
- * Gerenciador de múltiplas sessões WhatsApp (versão dinâmica)
+ * Gerenciador multi-tenant de sessões WhatsApp.
+ * Sessões são namespaced por tenantId: Map<tenantId, Map<accountId, WhatsAppSession>>.
+ * Eventos emitidos sempre incluem `tenantId` para roteamento.
  */
 class SessionManager extends EventEmitter {
     constructor() {
         super();
-        this.sessions = new Map(); // accountId => WhatsAppSession
+        this.tenantSessions = new Map(); // tenantId -> Map<accountId, WhatsAppSession>
     }
 
-    /**
-     * Cria uma nova sessão
-     */
-    async createSession(accountId, accountName, options = {}) {
+    _bucket(tenantId) {
+        if (!this.tenantSessions.has(tenantId)) {
+            this.tenantSessions.set(tenantId, new Map());
+        }
+        return this.tenantSessions.get(tenantId);
+    }
+
+    async createSession(tenantId, accountId, accountName, options = {}) {
         try {
-            if (this.sessions.has(accountId)) {
-                logger.warn(null, `Sessão ${accountName} (ID: ${accountId}) já existe`);
-                return this.sessions.get(accountId);
+            const bucket = this._bucket(tenantId);
+            if (bucket.has(accountId)) {
+                logger.warn(null, `Sessão ${accountName} (tenant ${tenantId} acc ${accountId}) já existe`);
+                return bucket.get(accountId);
             }
 
-            // Obtém configuração do banco
-            const account = await db.getAccount(accountId);
-            if (!account) {
-                throw new Error(`Conta ${accountId} não encontrada no banco de dados`);
-            }
+            const tdb = db.tenant(tenantId);
+            const account = await tdb.getAccount(accountId);
+            if (!account) throw new Error(`Conta ${accountId} não encontrada no tenant ${tenantId}`);
 
-            const session = new WhatsAppSession(accountId, accountName, account);
-            if (options) {
-                session.setRuntimeOptions(options);
-            }
+            const session = new WhatsAppSession(accountId, accountName, account, tenantId);
+            if (options) session.setRuntimeOptions(options);
 
-            // Propaga eventos da sessão
             session.on('qr', (qr) => {
                 this.emit('session:qr', {
-                    accountId,
-                    accountName,
-                    qr,
-                    publicIP: session.publicIP,
-                    isp: session.isp
+                    tenantId, accountId, accountName, qr,
+                    publicIP: session.publicIP, isp: session.isp
                 });
             });
 
             session.on('authenticated', async () => {
-                await db.updateAccountStatus(accountId, 'authenticated');
-                this.emit('session:authenticated', { accountId, accountName });
+                await tdb.updateAccountStatus(accountId, 'authenticated');
+                this.emit('session:authenticated', { tenantId, accountId, accountName });
             });
 
             session.on('ready', async (info) => {
-                await db.updateAccountStatus(accountId, 'ready', info.wid.user);
-                await db.updateStats(accountId, { uptime_start: new Date().toISOString() });
-                this.emit('session:ready', { accountId, accountName, info });
+                await tdb.updateAccountStatus(accountId, 'ready', info.wid.user);
+                await tdb.updateStats(accountId, { uptime_start: new Date().toISOString() });
+                this.emit('session:ready', { tenantId, accountId, accountName, info });
             });
 
             session.on('disconnected', async (reason) => {
-                await db.updateAccountStatus(accountId, 'disconnected');
-                this.emit('session:disconnected', { accountId, accountName, reason });
+                await tdb.updateAccountStatus(accountId, 'disconnected');
+                this.emit('session:disconnected', { tenantId, accountId, accountName, reason });
             });
 
             session.on('message', async (msg) => {
-                await db.updateStats(accountId, { messages_received: 1 });
-                this.emit('session:message', { accountId, accountName, message: msg });
+                await tdb.updateStats(accountId, { messages_received: 1 });
+                this.emit('session:message', { tenantId, accountId, accountName, message: msg });
             });
 
             session.on('message:sent', async () => {
-                await db.updateStats(accountId, { messages_sent: 1 });
+                await tdb.updateStats(accountId, { messages_sent: 1 });
             });
 
             session.on('error', (error) => {
-                this.emit('session:error', { accountId, accountName, error });
+                this.emit('session:error', { tenantId, accountId, accountName, error });
             });
 
-            this.sessions.set(accountId, session);
-
-            // Inicializa a sessão
+            bucket.set(accountId, session);
             await session.initialize();
-
             return session;
-
         } catch (error) {
-            logger.error(null, `Erro ao criar sessão ${accountName}: ${error.message}`);
+            logger.error(null, `Erro ao criar sessão tenant=${tenantId} acc=${accountName}: ${error.message}`);
             throw error;
         }
     }
 
-    /**
-     * Obtém uma sessão específica
-     */
-    getSession(accountId) {
-        return this.sessions.get(accountId);
+    getSession(tenantId, accountId) {
+        const bucket = this.tenantSessions.get(tenantId);
+        return bucket ? bucket.get(accountId) : null;
     }
 
     /**
-     * Obtém todas as sessões
+     * Lookup por accountId em todos os tenants. Útil para handlers de eventos onde só temos o accountId.
+     * Retorna { tenantId, session } ou null.
      */
-    getAllSessions() {
-        return Array.from(this.sessions.values());
+    findSession(accountId) {
+        for (const [tenantId, bucket] of this.tenantSessions) {
+            if (bucket.has(accountId)) return { tenantId, session: bucket.get(accountId) };
+        }
+        return null;
     }
 
-    /**
-     * Obtém informações de todas as sessões
-     */
-    /**
-     * Obtém informações de todas as sessões
-     */
-    async getAllSessionsInfo() {
+    getTenantSessions(tenantId) {
+        const bucket = this.tenantSessions.get(tenantId);
+        return bucket ? Array.from(bucket.values()) : [];
+    }
+
+    async getAllSessionsInfo(tenantId) {
         const sessions = [];
-        for (const [accountId, session] of this.sessions) {
-            const account = await db.getAccount(accountId);
+        const bucket = this.tenantSessions.get(tenantId);
+        if (!bucket) return sessions;
+        const tdb = db.tenant(tenantId);
+        for (const [accountId, session] of bucket) {
+            const account = await tdb.getAccount(accountId);
             const sessionInfo = await session.getInfo();
-            sessions.push({
-                ...sessionInfo,
-                ...account
-            });
+            sessions.push({ ...sessionInfo, ...account });
         }
         return sessions;
     }
 
-    /**
-     * Obtém estatísticas gerais
-     */
-    async getGlobalStats() {
-        const allAccounts = await db.getAllAccounts();
-
+    async getGlobalStats(tenantId) {
+        const tdb = db.tenant(tenantId);
+        const allAccounts = await tdb.getAllAccounts();
+        const bucket = this.tenantSessions.get(tenantId) || new Map();
         const stats = {
             totalAccounts: allAccounts.length,
-            activeSessions: this.sessions.size,
-            ready: 0,
-            qr: 0,
-            disconnected: 0,
-            totalMessagesSent: 0,
-            totalMessagesReceived: 0,
-            totalUniqueContacts: 0
+            activeSessions: bucket.size,
+            ready: 0, qr: 0, disconnected: 0,
+            totalMessagesSent: 0, totalMessagesReceived: 0, totalUniqueContacts: 0
         };
-
-        allAccounts.forEach(account => {
-            if (account.status === 'ready') stats.ready++;
-            else if (account.status === 'qr') stats.qr++;
-            else if (account.status === 'disconnected') stats.disconnected++;
-
-            stats.totalMessagesSent += account.messages_sent || 0;
-            stats.totalMessagesReceived += account.messages_received || 0;
-            stats.totalUniqueContacts += account.unique_contacts || 0;
-        });
-
+        for (const a of allAccounts) {
+            if (a.status === 'ready') stats.ready++;
+            else if (a.status === 'qr') stats.qr++;
+            else if (a.status === 'disconnected') stats.disconnected++;
+            stats.totalMessagesSent += a.messages_sent || 0;
+            stats.totalMessagesReceived += a.messages_received || 0;
+            stats.totalUniqueContacts += a.unique_contacts || 0;
+        }
         return stats;
     }
 
-    /**
-     * Destrói uma sessão específica
-     */
-    async destroySession(accountId) {
-        const session = this.sessions.get(accountId);
+    async destroySession(tenantId, accountId) {
+        const bucket = this.tenantSessions.get(tenantId);
+        if (!bucket) return;
+        const session = bucket.get(accountId);
         if (session) {
             await session.destroy();
-            this.sessions.delete(accountId);
-            await db.updateAccountStatus(accountId, 'disconnected');
-            logger.info(null, `Sessão ${accountId} removida`);
+            bucket.delete(accountId);
+            await db.tenant(tenantId).updateAccountStatus(accountId, 'disconnected');
+            logger.info(null, `Sessão tenant=${tenantId} acc=${accountId} removida`);
         }
     }
 
-    /**
-     * Destrói todas as sessões
-     */
-    async destroyAll() {
-        logger.info(null, 'Destruindo todas as sessões...');
-
-        const promises = Array.from(this.sessions.values()).map(session => session.destroy());
+    async destroyTenantSessions(tenantId) {
+        const bucket = this.tenantSessions.get(tenantId);
+        if (!bucket) return;
+        const promises = Array.from(bucket.values()).map((s) => s.destroy());
         await Promise.allSettled(promises);
+        bucket.clear();
+    }
 
-        this.sessions.clear();
+    async destroyAll() {
+        logger.info(null, 'Destruindo todas as sessões de todos os tenants...');
+        for (const [tenantId] of this.tenantSessions) {
+            await this.destroyTenantSessions(tenantId);
+        }
+        this.tenantSessions.clear();
         logger.success(null, 'Todas as sessões destruídas');
     }
 }
 
-// Singleton
 const sessionManager = new SessionManager();
-
 module.exports = sessionManager;

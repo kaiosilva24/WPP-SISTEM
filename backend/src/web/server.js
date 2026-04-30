@@ -3,131 +3,64 @@ const http = require('http');
 const socketIO = require('socket.io');
 const cors = require('cors');
 const QRCode = require('qrcode');
+const path = require('path');
 const logger = require('../utils/logger');
 const sessionManager = require('../services/SessionManager');
-const messageHandler = require('../services/MessageHandler');
 const accountsRouter = require('../api/accounts');
+const dispatchRouter = require('../api/dispatch');
+const authRouter = require('../api/auth');
+const adminRouter = require('../api/admin');
+const dispatchEngine = require('../services/DispatchEngine');
+const dispatchAutoReply = require('../services/DispatchAutoReply');
+const db = require('../database/DatabaseManager');
+const { verifyToken } = require('../middleware/auth');
 
-/**
- * Servidor backend API (porta 3000)
- */
 class WebServer {
     constructor() {
         this.app = express();
         this.server = http.createServer(this.app);
-
-        // Configuração CORS para Socket.IO
         this.io = socketIO(this.server, {
             cors: {
                 origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-                methods: ['GET', 'POST', 'PUT', 'DELETE'],
+                methods: ['GET','POST','PUT','DELETE'],
                 credentials: true
             }
         });
-
         this.setupMiddleware();
         this.setupRoutes();
         this.setupSocketIO();
     }
 
-    /**
-     * Configura middleware
-     */
     setupMiddleware() {
-        const path = require('path');
-
-        // CORS para requisições HTTP (suporta desenvolvimento e produção)
         const allowedOrigins = [
             process.env.FRONTEND_URL || 'http://localhost:5173',
             'http://localhost:3000',
             'https://wpp.discloud.app',
             'https://wpp-aquecimento.discloud.app'
         ];
-
         this.app.use(cors({
-            origin: function (origin, callback) {
-                // Permite requests sem origin (como mobile apps ou curl)
-                if (!origin) return callback(null, true);
-                if (allowedOrigins.indexOf(origin) !== -1) {
-                    callback(null, true);
-                } else {
-                    callback(null, true); // Permite todos em produção para simplificar
-                }
-            },
+            origin: (origin, cb) => cb(null, true),
             credentials: true
         }));
-
         this.app.use(express.json());
-
-        // Serve arquivos estáticos do frontend (produção)
         const frontendPath = path.join(__dirname, '..', '..', '..', 'frontend', 'dist');
         this.app.use(express.static(frontendPath));
         logger.info(null, `📂 Servindo arquivos estáticos de: ${frontendPath}`);
     }
 
-    /**
-     * Configura rotas
-     */
     setupRoutes() {
-        // Health check
-        this.app.get('/api/health', (req, res) => {
-            res.json({ status: 'ok', message: 'Backend API rodando' });
-        });
+        this.app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
-        // API de contas
+        // públicas
+        this.app.use('/api/auth', authRouter);
+
+        // protegidas
+        this.app.use('/api/admin', adminRouter);
         this.app.use('/api/accounts', accountsRouter);
+        this.app.use('/api/dispatch', dispatchRouter);
 
-        // API: Estatísticas globais
-        this.app.get('/api/stats', async (req, res) => {
-            const globalStats = await sessionManager.getGlobalStats();
-            const handlerStats = messageHandler.getStats();
-
-            res.json({
-                ...globalStats,
-                ...handlerStats
-            });
-        });
-
-        // API: Testar proxy
-        this.app.post('/api/test-proxy', async (req, res) => {
-            const { ip, port, username, password } = req.body;
-
-            try {
-                const { HttpsProxyAgent } = require('https-proxy-agent');
-                const axios = require('axios');
-
-                // Monta URL do proxy
-                let proxyUrl = `http://`;
-                if (username && password) {
-                    proxyUrl += `${username}:${password}@`;
-                }
-                proxyUrl += `${ip}:${port}`;
-
-                const agent = new HttpsProxyAgent(proxyUrl);
-
-                // Testa fazendo uma requisição
-                const response = await axios.get('https://api.ipify.org?format=json', {
-                    httpsAgent: agent,
-                    timeout: 10000
-                });
-
-                res.json({
-                    success: true,
-                    ip: response.data.ip,
-                    message: 'Proxy funcionando!'
-                });
-            } catch (error) {
-                res.json({
-                    success: false,
-                    error: error.message
-                });
-            }
-        });
-
-        // SPA Fallback - Serve index.html para todas as rotas não-API
-        const path = require('path');
+        // SPA fallback
         this.app.get('*', (req, res) => {
-            // Se não é uma rota de API, serve o frontend
             if (!req.path.startsWith('/api') && !req.path.startsWith('/socket.io')) {
                 const frontendPath = path.join(__dirname, '..', '..', '..', 'frontend', 'dist', 'index.html');
                 res.sendFile(frontendPath);
@@ -135,100 +68,117 @@ class WebServer {
         });
     }
 
-    /**
-     * Configura Socket.IO para atualizações em tempo real
-     */
     setupSocketIO() {
-        this.io.on('connection', (socket) => {
-            logger.info(null, `Cliente conectado ao backend: ${socket.id}`);
-
-            // Envia estado inicial
-            (async () => {
-                const sessions = await sessionManager.getAllSessionsInfo();
-                socket.emit('initial-state', {
-                    sessions,
-                    stats: await sessionManager.getGlobalStats()
-                });
-            })();
-
-            socket.on('disconnect', () => {
-                logger.debug(null, `Cliente desconectado: ${socket.id}`);
-            });
-        });
-
-        // Eventos do SessionManager
-        sessionManager.on('session:qr', async ({ accountId, accountName, qr, publicIP, isp }) => {
+        // Auth no handshake
+        this.io.use(async (socket, next) => {
             try {
-                const qrImage = await QRCode.toDataURL(qr);
-                this.io.emit('session:qr', { accountId, accountName, qr: qrImage, publicIP, isp });
-            } catch (error) {
-                logger.error(null, `Erro ao gerar QR Code: ${error.message}`);
+                const token = (socket.handshake.auth && socket.handshake.auth.token)
+                    || (socket.handshake.query && socket.handshake.query.token);
+                if (!token) return next(new Error('Token ausente'));
+                const decoded = verifyToken(token);
+                const user = await db.getUserById(decoded.uid);
+                if (!user) return next(new Error('Usuário inválido'));
+                socket.user = user;
+                next();
+            } catch (e) {
+                next(new Error('Token inválido: ' + e.message));
             }
         });
 
-        sessionManager.on('session:authenticated', ({ accountId, accountName }) => {
-            this.io.emit('session:authenticated', { accountId, accountName });
-            this.broadcastUpdate();
-        });
+        this.io.on('connection', async (socket) => {
+            const u = socket.user;
+            logger.info(null, `Cliente Socket.IO conectado: ${socket.id} user=${u.email} role=${u.role}`);
 
-        sessionManager.on('session:ready', ({ accountId, accountName, info }) => {
-            this.io.emit('session:ready', { accountId, accountName, info });
-            this.broadcastUpdate();
-        });
+            if (u.role === 'admin') {
+                socket.join('admin');
+            } else if (u.role === 'customer' && u.tenant_id) {
+                socket.join(`tenant:${u.tenant_id}`);
+                // Estado inicial do tenant
+                try {
+                    const sessions = await sessionManager.getAllSessionsInfo(u.tenant_id);
+                    socket.emit('initial-state', {
+                        sessions,
+                        stats: await sessionManager.getGlobalStats(u.tenant_id)
+                    });
+                } catch (_) {}
+            }
 
-        sessionManager.on('session:disconnected', ({ accountId, accountName, reason }) => {
-            this.io.emit('session:disconnected', { accountId, accountName, reason });
-            this.broadcastUpdate();
-        });
-
-        sessionManager.on('session:message', ({ accountId, accountName, message }) => {
-            this.io.emit('session:message', {
-                accountId,
-                accountName,
-                from: message.from,
-                body: message.body,
-                timestamp: message.timestamp
+            socket.on('disconnect', () => {
+                logger.debug(null, `Socket.IO desconectado: ${socket.id}`);
             });
-            this.broadcastUpdate();
         });
 
-        sessionManager.on('session:error', ({ accountId, accountName, error }) => {
-            this.io.emit('session:error', { accountId, accountName, error: error.message });
-            this.broadcastUpdate();
+        // Eventos do SessionManager — broadcast só para a room do tenant
+        sessionManager.on('session:qr', async ({ tenantId, accountId, accountName, qr, publicIP, isp }) => {
+            try {
+                const qrImage = await QRCode.toDataURL(qr);
+                this.io.to(`tenant:${tenantId}`).emit('session:qr', { accountId, accountName, qr: qrImage, publicIP, isp });
+            } catch (e) { logger.error(null, `QR error: ${e.message}`); }
+        });
+
+        sessionManager.on('session:authenticated', ({ tenantId, accountId, accountName }) => {
+            this.io.to(`tenant:${tenantId}`).emit('session:authenticated', { accountId, accountName });
+            this.broadcastTenantUpdate(tenantId);
+        });
+
+        sessionManager.on('session:ready', ({ tenantId, accountId, accountName, info }) => {
+            this.io.to(`tenant:${tenantId}`).emit('session:ready', { accountId, accountName, info });
+            this.broadcastTenantUpdate(tenantId);
+        });
+
+        sessionManager.on('session:disconnected', ({ tenantId, accountId, accountName, reason }) => {
+            this.io.to(`tenant:${tenantId}`).emit('session:disconnected', { accountId, accountName, reason });
+            this.broadcastTenantUpdate(tenantId);
+        });
+
+        sessionManager.on('session:message', ({ tenantId, accountId, accountName, message }) => {
+            this.io.to(`tenant:${tenantId}`).emit('session:message', {
+                accountId, accountName, from: message.from, body: message.body, timestamp: message.timestamp
+            });
+            this.broadcastTenantUpdate(tenantId);
+        });
+
+        sessionManager.on('session:error', ({ tenantId, accountId, accountName, error }) => {
+            this.io.to(`tenant:${tenantId}`).emit('session:error', { accountId, accountName, error: error.message });
+            this.broadcastTenantUpdate(tenantId);
+        });
+
+        // Disparo
+        dispatchAutoReply.attach();
+        dispatchEngine.on('contact:update', (p) => {
+            if (p.tenantId) this.io.to(`tenant:${p.tenantId}`).emit('dispatch:contact:update', p);
+        });
+        dispatchEngine.on('message', (p) => {
+            if (p.tenantId) this.io.to(`tenant:${p.tenantId}`).emit('dispatch:message', p);
+        });
+        dispatchEngine.on('campaign:update', (p) => {
+            if (p.tenantId) this.io.to(`tenant:${p.tenantId}`).emit('dispatch:campaign:update', p);
         });
     }
 
-    /**
-     * Envia atualização de estado para todos os clientes
-     */
-    async broadcastUpdate() {
-        const sessions = await sessionManager.getAllSessionsInfo();
-        this.io.emit('update', {
-            sessions,
-            stats: await sessionManager.getGlobalStats()
-        });
+    async broadcastTenantUpdate(tenantId) {
+        try {
+            const sessions = await sessionManager.getAllSessionsInfo(tenantId);
+            this.io.to(`tenant:${tenantId}`).emit('update', {
+                sessions,
+                stats: await sessionManager.getGlobalStats(tenantId)
+            });
+        } catch (_) {}
     }
 
-    /**
-     * Inicia o servidor
-     */
     start(port = 3000) {
         return new Promise((resolve) => {
             this.server.listen(port, () => {
                 logger.success(null, `🚀 Backend API rodando em http://localhost:${port}`);
-                logger.info(null, `🔗 CORS habilitado para: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
                 resolve();
             });
         });
     }
 
-    /**
-     * Para o servidor
-     */
     stop() {
         return new Promise((resolve) => {
             this.server.close(() => {
-                logger.info(null, 'Servidor backend encerrado');
+                logger.info(null, 'Servidor encerrado');
                 resolve();
             });
         });

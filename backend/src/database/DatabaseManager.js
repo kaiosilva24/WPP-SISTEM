@@ -1,306 +1,270 @@
 const { Pool } = require('pg');
 const path = require('path');
-const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
-const logger = require('../utils/logger'); // Ensure logger is available or handle referencing
+const TenantDb = require('./TenantDb');
+const Tenancy = require('./Tenancy');
 
 /**
- * Gerenciador de banco de dados PostgreSQL
+ * Gerenciador global do banco. Mantém pool, opera em schema 'public' (tabelas globais)
+ * e expõe `db.tenant(tenantIdOrSchema)` para acesso isolado por tenant.
  */
 class DatabaseManager {
-  constructor() {
-    this.pool = new Pool({
-      user: process.env.DB_USER,
-      host: process.env.DB_HOST,
-      database: process.env.DB_NAME,
-      password: process.env.DB_PASS,
-      port: process.env.DB_PORT || 5432,
-    });
-
-    this.pool.on('error', (err, client) => {
-      console.error('Unexpected error on idle client', err);
-      // Don't exit process, just log
-    });
-
-    // Inicializa tabelas deve ser chamado explicitamente
-  }
-
-  /**
-   * Inicializa tabelas
-   */
-  async initTables() {
-    const client = await this.pool.connect();
-    try {
-      // Tabela de contas
-      await client.query(`
-                CREATE TABLE IF NOT EXISTS accounts (
-                    id SERIAL PRIMARY KEY,
-                    name TEXT UNIQUE NOT NULL,
-                    status TEXT DEFAULT 'disconnected',
-                    phone_number TEXT,
-                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                )
-            `);
-
-      // Tabela de configurações de conta
-      await client.query(`
-                CREATE TABLE IF NOT EXISTS account_configs (
-                    account_id INTEGER PRIMARY KEY,
-                    proxy_enabled BOOLEAN DEFAULT FALSE,
-                    proxy_ip TEXT,
-                    proxy_port INTEGER,
-                    proxy_username TEXT,
-                    proxy_password TEXT,
-                    min_read_delay INTEGER DEFAULT 3000,
-                    max_read_delay INTEGER DEFAULT 15000,
-                    min_typing_delay INTEGER DEFAULT 5000,
-                    max_typing_delay INTEGER DEFAULT 20000,
-                    min_response_delay INTEGER DEFAULT 10000,
-                    max_response_delay INTEGER DEFAULT 30000,
-                    min_message_interval INTEGER DEFAULT 20000,
-                    ignore_probability INTEGER DEFAULT 20,
-                    media_enabled BOOLEAN DEFAULT TRUE,
-                    media_interval INTEGER DEFAULT 2,
-                    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-                )
-            `);
-
-      // Tabela de mensagens personalizadas
-      await client.query(`
-                CREATE TABLE IF NOT EXISTS account_messages (
-                    id SERIAL PRIMARY KEY,
-                    account_id INTEGER NOT NULL,
-                    message_type TEXT NOT NULL, -- 'first', 'followup', 'group'
-                    message_text TEXT NOT NULL,
-                    enabled BOOLEAN DEFAULT TRUE,
-                    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-                )
-            `);
-
-      // Tabela de estatísticas
-      await client.query(`
-                CREATE TABLE IF NOT EXISTS account_stats (
-                    account_id INTEGER PRIMARY KEY,
-                    messages_sent INTEGER DEFAULT 0,
-                    messages_received INTEGER DEFAULT 0,
-                    unique_contacts INTEGER DEFAULT 0,
-                    last_activity TIMESTAMPTZ,
-                    uptime_start TIMESTAMPTZ,
-                    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-                )
-            `);
-
-      console.log('✅ Database tables initialized (PostgreSQL)');
-    } catch (error) {
-      console.error('❌ Error initializing tables:', error);
-      throw error;
-    } finally {
-      client.release();
+    constructor() {
+        this.pool = new Pool({
+            user: process.env.DB_USER,
+            host: process.env.DB_HOST,
+            database: process.env.DB_NAME,
+            password: process.env.DB_PASS,
+            port: process.env.DB_PORT || 5432,
+        });
+        this.pool.on('error', (err) => console.error('Unexpected pool error', err));
+        this._tenantCache = new Map(); // schema_name -> TenantDb
     }
-  }
 
-  /**
-   * Cria uma nova conta
-   */
-  async createAccount(name) {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
+    /**
+     * Inicializa tabelas globais em schema public (users, tenants, plans, subscriptions).
+     */
+    async initGlobalTables() {
+        const client = await this.pool.connect();
+        try {
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS tenants (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    schema_name TEXT UNIQUE NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+            `);
 
-      const res = await client.query('INSERT INTO accounts (name) VALUES ($1) RETURNING *', [name]);
-      const account = res.rows[0];
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+            `);
 
-      // Cria configuração padrão
-      await client.query('INSERT INTO account_configs (account_id) VALUES ($1)', [account.id]);
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS plans (
+                    id SERIAL PRIMARY KEY,
+                    code TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    max_accounts INTEGER NOT NULL,
+                    monthly_price NUMERIC(10,2) DEFAULT 0
+                )
+            `);
 
-      // Cria estatísticas
-      await client.query('INSERT INTO account_stats (account_id) VALUES ($1)', [account.id]);
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id SERIAL PRIMARY KEY,
+                    tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+                    plan_id INTEGER REFERENCES plans(id),
+                    status TEXT NOT NULL DEFAULT 'active',
+                    current_period_end TIMESTAMPTZ,
+                    payment_provider TEXT,
+                    external_subscription_id TEXT,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+            `);
 
-      await client.query('COMMIT');
-      return this.getAccount(account.id);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+            // Seed dos 3 planos
+            await client.query(`
+                INSERT INTO plans (code, name, max_accounts) VALUES
+                  ('basic','Básico',5),
+                  ('medium','Médio',10),
+                  ('max','Máximo',20)
+                ON CONFLICT (code) DO NOTHING
+            `);
+
+            console.log('✅ Global tables initialized (public schema)');
+        } finally {
+            client.release();
+        }
     }
-  }
 
-  /**
-   * Obtém uma conta por ID
-   */
-  async getAccount(id) {
-    const res = await this.pool.query(`
-            SELECT a.*, c.*, s.*
-            FROM accounts a
-            LEFT JOIN account_configs c ON a.id = c.account_id
-            LEFT JOIN account_stats s ON a.id = s.account_id
-            WHERE a.id = $1
-        `, [id]);
-    return res.rows[0];
-  }
+    /**
+     * Atalho ao tenant DB.
+     */
+    tenant(tenantOrSchema) {
+        if (!tenantOrSchema) throw new Error('tenant() requer tenantId ou schema_name');
+        let schema;
+        if (typeof tenantOrSchema === 'string' && tenantOrSchema.startsWith('tenant_')) {
+            schema = tenantOrSchema;
+        } else {
+            schema = `tenant_${tenantOrSchema}`;
+        }
+        if (this._tenantCache.has(schema)) return this._tenantCache.get(schema);
+        const t = new TenantDb(this.pool, schema);
+        this._tenantCache.set(schema, t);
+        return t;
+    }
 
-  /**
-   * Obtém uma conta por nome
-   */
-  async getAccountByName(name) {
-    const res = await this.pool.query(`
-            SELECT a.*, c.*, s.*
-            FROM accounts a
-            LEFT JOIN account_configs c ON a.id = c.account_id
-            LEFT JOIN account_stats s ON a.id = s.account_id
-            WHERE a.name = $1
-        `, [name]);
-    return res.rows[0];
-  }
+    // ==================== TENANTS ====================
 
-  /**
-   * Obtém todas as contas
-   */
-  async getAllAccounts() {
-    const res = await this.pool.query(`
-            SELECT a.*, c.*, s.*
-            FROM accounts a
-            LEFT JOIN account_configs c ON a.id = c.account_id
-            LEFT JOIN account_stats s ON a.id = s.account_id
-            ORDER BY a.created_at DESC
+    async createTenant(name) {
+        const client = await this.pool.connect();
+        try {
+            await client.query('BEGIN');
+            const r = await client.query('INSERT INTO tenants (name, schema_name) VALUES ($1, $2) RETURNING *', [name, 'placeholder']);
+            const t = r.rows[0];
+            const schemaName = `tenant_${t.id}`;
+            await client.query('UPDATE tenants SET schema_name = $1 WHERE id = $2', [schemaName, t.id]);
+            await client.query('COMMIT');
+            await Tenancy.provisionTenantSchema(this.pool, schemaName);
+            return { ...t, schema_name: schemaName };
+        } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        } finally {
+            client.release();
+        }
+    }
+
+    async getTenant(id) {
+        const r = await this.pool.query('SELECT * FROM tenants WHERE id = $1', [id]);
+        return r.rows[0];
+    }
+
+    async listTenants() {
+        const r = await this.pool.query(`
+            SELECT t.*, p.name AS plan_name, p.code AS plan_code, p.max_accounts,
+                   s.id AS subscription_id, s.status AS subscription_status, s.current_period_end,
+                   u.email AS owner_email, u.id AS owner_user_id
+            FROM tenants t
+            LEFT JOIN LATERAL (
+                SELECT * FROM subscriptions WHERE tenant_id = t.id ORDER BY id DESC LIMIT 1
+            ) s ON true
+            LEFT JOIN plans p ON p.id = s.plan_id
+            LEFT JOIN LATERAL (
+                SELECT id, email FROM users WHERE tenant_id = t.id AND role = 'customer' ORDER BY id ASC LIMIT 1
+            ) u ON true
+            ORDER BY t.id DESC
         `);
-    return res.rows;
-  }
-
-  /**
-   * Atualiza status da conta
-   */
-  async updateAccountStatus(id, status, phoneNumber = null) {
-    await this.pool.query(`
-            UPDATE accounts 
-            SET status = $1, phone_number = COALESCE($2, phone_number), updated_at = CURRENT_TIMESTAMP
-            WHERE id = $3
-        `, [status, phoneNumber, id]);
-  }
-
-  /**
-   * Atualiza configuração da conta
-   */
-  async updateAccountConfig(id, config) {
-    const fields = [];
-    const values = [];
-    let index = 1;
-
-    const allowedFields = [
-      'proxy_enabled', 'proxy_ip', 'proxy_port', 'proxy_username', 'proxy_password',
-      'min_read_delay', 'max_read_delay', 'min_typing_delay', 'max_typing_delay',
-      'min_response_delay', 'max_response_delay', 'min_message_interval',
-      'ignore_probability', 'media_enabled', 'media_interval'
-    ];
-
-    for (const field of allowedFields) {
-      if (config[field] !== undefined) {
-        fields.push(`${field} = $${index++}`);
-        values.push(config[field]);
-      }
+        return r.rows;
     }
 
-    if (fields.length === 0) return;
-
-    values.push(id);
-    await this.pool.query(`
-            UPDATE account_configs SET ${fields.join(', ')} WHERE account_id = $${index}
-        `, values);
-  }
-
-  /**
-   * Adiciona mensagem personalizada
-   */
-  async addAccountMessage(accountId, messageType, messageText) {
-    const res = await this.pool.query(`
-            INSERT INTO account_messages (account_id, message_type, message_text)
-            VALUES ($1, $2, $3)
-            RETURNING id
-        `, [accountId, messageType, messageText]);
-    return { lastInsertRowid: res.rows[0].id }; // Maintain compatibility shape if needed, or just return ID
-  }
-
-  /**
-   * Obtém mensagens da conta
-   */
-  async getAccountMessages(accountId, messageType = null) {
-    let query = 'SELECT * FROM account_messages WHERE account_id = $1 AND enabled = TRUE';
-    const params = [accountId];
-
-    if (messageType) {
-      query += ' AND message_type = $2';
-      params.push(messageType);
+    async updateTenantStatus(id, status) {
+        if (!['active','suspended'].includes(status)) throw new Error('status inválido');
+        await this.pool.query('UPDATE tenants SET status = $1 WHERE id = $2', [status, id]);
     }
 
-    const res = await this.pool.query(query, params);
-    return res.rows;
-  }
-
-  /**
-   * Remove mensagem
-   */
-  async deleteAccountMessage(id) {
-    await this.pool.query('DELETE FROM account_messages WHERE id = $1', [id]);
-  }
-
-  /**
-   * Atualiza estatísticas
-   */
-  async updateStats(accountId, stats) {
-    const fields = [];
-    const values = [];
-    let index = 1;
-
-    if (stats.messages_sent !== undefined) {
-      fields.push(`messages_sent = messages_sent + $${index++}`);
-      values.push(stats.messages_sent);
+    async deleteTenant(id) {
+        const t = await this.getTenant(id);
+        if (!t) return;
+        await Tenancy.dropTenantSchema(this.pool, t.schema_name);
+        await this.pool.query('DELETE FROM tenants WHERE id = $1', [id]);
+        this._tenantCache.delete(t.schema_name);
     }
 
-    if (stats.messages_received !== undefined) {
-      fields.push(`messages_received = messages_received + $${index++}`);
-      values.push(stats.messages_received);
+    // ==================== USERS ====================
+
+    async createUser({ email, passwordHash, role, tenantId = null }) {
+        const r = await this.pool.query(
+            'INSERT INTO users (email, password_hash, role, tenant_id) VALUES ($1,$2,$3,$4) RETURNING id, email, role, tenant_id, created_at',
+            [email.toLowerCase(), passwordHash, role, tenantId]
+        );
+        return r.rows[0];
     }
 
-    if (stats.unique_contacts !== undefined) {
-      fields.push(`unique_contacts = $${index++}`);
-      values.push(stats.unique_contacts);
+    async getUserByEmail(email) {
+        const r = await this.pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
+        return r.rows[0];
     }
 
-    fields.push('last_activity = CURRENT_TIMESTAMP');
-
-    if (stats.uptime_start !== undefined) {
-      fields.push(`uptime_start = $${index++}`);
-      values.push(stats.uptime_start);
+    async getUserById(id) {
+        const r = await this.pool.query('SELECT id, email, role, tenant_id, created_at FROM users WHERE id = $1', [id]);
+        return r.rows[0];
     }
 
-    values.push(accountId);
+    async updateUserPassword(id, passwordHash) {
+        await this.pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, id]);
+    }
 
-    if (fields.length === 0) return; // Should likely process last_activity still? Original code implied so.
-    // Actually original updated last_activity unconditionally.
+    async getTenantOwner(tenantId) {
+        const r = await this.pool.query(
+            "SELECT id, email, role, tenant_id FROM users WHERE tenant_id = $1 AND role = 'customer' ORDER BY id ASC LIMIT 1",
+            [tenantId]
+        );
+        return r.rows[0];
+    }
 
-    await this.pool.query(`
-            UPDATE account_stats SET ${fields.join(', ')} WHERE account_id = $${index}
-        `, values);
-  }
+    // ==================== PLANS ====================
 
-  /**
-   * Deleta uma conta
-   */
-  async deleteAccount(id) {
-    await this.pool.query('DELETE FROM accounts WHERE id = $1', [id]);
-  }
+    async listPlans() {
+        const r = await this.pool.query('SELECT * FROM plans ORDER BY max_accounts ASC');
+        return r.rows;
+    }
 
-  /**
-   * Fecha conexão
-   */
-  async close() {
-    await this.pool.end();
-  }
+    async getPlanByCode(code) {
+        const r = await this.pool.query('SELECT * FROM plans WHERE code = $1', [code]);
+        return r.rows[0];
+    }
+
+    async getPlan(id) {
+        const r = await this.pool.query('SELECT * FROM plans WHERE id = $1', [id]);
+        return r.rows[0];
+    }
+
+    // ==================== SUBSCRIPTIONS ====================
+
+    async createSubscription({ tenantId, planId, currentPeriodEnd = null }) {
+        const r = await this.pool.query(
+            'INSERT INTO subscriptions (tenant_id, plan_id, current_period_end) VALUES ($1,$2,$3) RETURNING *',
+            [tenantId, planId, currentPeriodEnd]
+        );
+        return r.rows[0];
+    }
+
+    async getActiveSubscription(tenantId) {
+        const r = await this.pool.query(
+            "SELECT s.*, p.code AS plan_code, p.name AS plan_name, p.max_accounts FROM subscriptions s JOIN plans p ON p.id = s.plan_id WHERE s.tenant_id = $1 ORDER BY s.id DESC LIMIT 1",
+            [tenantId]
+        );
+        return r.rows[0];
+    }
+
+    async updateSubscription(id, { planId, status, currentPeriodEnd }) {
+        const fields = [];
+        const values = [];
+        let i = 1;
+        if (planId !== undefined) { fields.push(`plan_id = $${i++}`); values.push(planId); }
+        if (status !== undefined) { fields.push(`status = $${i++}`); values.push(status); }
+        if (currentPeriodEnd !== undefined) { fields.push(`current_period_end = $${i++}`); values.push(currentPeriodEnd); }
+        if (!fields.length) return;
+        values.push(id);
+        await this.pool.query(`UPDATE subscriptions SET ${fields.join(', ')} WHERE id = $${i}`, values);
+    }
+
+    async listExpiredSubscriptions() {
+        const r = await this.pool.query(
+            "SELECT s.*, t.id AS tenant_id, t.schema_name FROM subscriptions s JOIN tenants t ON t.id = s.tenant_id WHERE s.status = 'active' AND s.current_period_end IS NOT NULL AND s.current_period_end < now()"
+        );
+        return r.rows;
+    }
+
+    // ==================== LEGACY DETECTION ====================
+
+    /**
+     * Detecta se 'accounts' está em public (modo legado pré-multi-tenant).
+     */
+    async isLegacy() {
+        const r = await this.pool.query(`
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'accounts'
+            ) AS exists
+        `);
+        return r.rows[0].exists === true;
+    }
+
+    async close() {
+        await this.pool.end();
+    }
 }
 
-// Singleton
 const dbManager = new DatabaseManager();
-
 module.exports = dbManager;
