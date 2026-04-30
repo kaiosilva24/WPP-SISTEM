@@ -6,16 +6,31 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "postinstall": "npm --prefix backend install --omit=dev && npm --prefix frontend install && npm --prefix frontend run build",
-    "backend:install": "npm --prefix backend install",
-    "frontend:install": "npm --prefix frontend install",
-    "frontend:build": "npm --prefix frontend run build"
+    "build:frontend": "npm --prefix frontend install && npm --prefix frontend run build"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "dotenv": "^16.4.5"
+    "axios": "^1.9.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "https-proxy-agent": "^7.0.6",
+    "jsonwebtoken": "^9.0.3",
+    "moment-timezone": "^0.5.45",
+    "multer": "^2.1.1",
+    "pg": "^8.18.0",
+    "proxy-chain": "^2.7.1",
+    "puppeteer": "^24.37.1",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-proxy": "^1.0.2",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "qrcode": "^1.5.3",
+    "qrcode-terminal": "^0.12.0",
+    "socket.io": "^4.6.1",
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js"
   },
   "keywords": [
     "whatsapp",

@@ -59,9 +59,17 @@ create_db.js
 dump_db.js
 test_*.js
 
-# Frontend dev (mantém apenas dist depois do build remoto)
+# Frontend dev (dist é enviado pré-buildado)
 frontend/.vite/
-frontend/dist/
+# Source do frontend não é necessário em produção; só o dist
+frontend/src/
+frontend/public/
+frontend/node_modules/
+frontend/package.json
+frontend/package-lock.json
+frontend/vite.config.js
+frontend/index.html
+frontend/eslint.config.js
 
 # Docs grandes (não precisa em produção)
 DEPLOY.md
