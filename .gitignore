@@ -9,6 +9,7 @@ package-lock.json
 
 # Sessões autenticadas (IMPORTANTE: Faça backup!)
 .wwebjs_auth/
+.wwebjs_auth_aquecimento/
 .wwebjs_cache/
 
 # Logs e arquivos de debug
@@ -67,3 +68,13 @@ database.sqlite
 # Arquivos de teste
 test_*.js
 fix_webhook.py
+
+# Frontend build
+frontend/dist/
+frontend/.vite/
+
+# Mídias do disparo (cada deploy começa do zero)
+media/dispatch/
+
+# Blacklist por tenant
+blacklist/

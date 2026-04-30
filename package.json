@@ -1,46 +1,28 @@
 {
-  "name": "whatsapp-warming-system",
-  "version": "2.0.0",
-  "description": "Sistema de aquecimento de WhatsApp com gerenciamento dinâmico de contas",
+  "name": "wpp-sistem-multitenant",
+  "version": "3.0.0",
+  "description": "Sistema multi-tenant de aquecimento e disparo WhatsApp com painel admin",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "test": "echo \"Sistema de Aquecimento WhatsApp\" && exit 0",
-    "postinstall": "patch-package"
+    "postinstall": "npm --prefix backend install --omit=dev && npm --prefix frontend install && npm --prefix frontend run build",
+    "backend:install": "npm --prefix backend install",
+    "frontend:install": "npm --prefix frontend install",
+    "frontend:build": "npm --prefix frontend run build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
   },
   "keywords": [
     "whatsapp",
     "warming",
-    "automation",
-    "multi-account"
+    "dispatch",
+    "multi-tenant",
+    "saas"
   ],
-  "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
-    "archiver": "^7.0.1",
-    "axios": "^1.9.0",
-    "bcryptjs": "^3.0.3",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.18.2",
-    "fluent-ffmpeg": "^2.1.3",
-    "fs-extra": "^11.3.3",
-    "https-proxy-agent": "^7.0.6",
-    "jsonwebtoken": "^9.0.3",
-    "moment-timezone": "^0.5.45",
-    "multer": "^2.0.2",
-    "node-cache": "^5.1.2",
-    "patch-package": "^8.0.1",
-    "pg": "^8.18.0",
-    "pino": "^10.3.1",
-    "pino-pretty": "^13.1.3",
-    "postinstall-postinstall": "^2.1.0",
-    "qrcode": "^1.5.3",
-    "qrcode-terminal": "^0.12.0",
-    "socket.io": "^4.6.1",
-    "unzipper": "^0.12.3"
-  }
+  "license": "MIT"
 }

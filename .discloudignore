@@ -1,0 +1,77 @@
+# Ignorar pelo upload do DisCloud (paralelo ao .gitignore)
+node_modules/
+**/node_modules/
+.git/
+.github/
+.vscode/
+.idea/
+
+# Sessões locais (cada deploy começa limpo)
+.wwebjs_auth/
+.wwebjs_auth_aquecimento/
+.wwebjs_cache/
+
+# Logs e debug locais
+logs/
+*.log
+crash_log*.txt
+debug_utf8*.txt
+filtered_log.txt
+log_debug.txt
+logs_nacional*.txt
+err.txt
+error_launch.log
+check_result.txt
+
+# Cache puppeteer/chromium local
+puppeteer_data/
+.local-chromium/
+**/Crashpad/**
+**/Cache/**
+**/GPUCache/**
+
+# Arquivos temporários
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+
+# Backups
+*.backup
+*.bak
+sessoes_*.tar.gz
+
+# DB local
+database.sqlite
+
+# Pastas legadas / não usadas
+src/
+src_backend/
+landing_page/
+data/
+patches/
+old_session.js
+refactor.js
+check_db.js
+check_tables.js
+create_db.js
+dump_db.js
+test_*.js
+
+# Frontend dev (mantém apenas dist depois do build remoto)
+frontend/.vite/
+frontend/dist/
+
+# Docs grandes (não precisa em produção)
+DEPLOY.md
+DISCLOUD_DEPLOY.md
+DISCLOUD_ENV_SETUP.md
+QUICKSTART.md
+docker-compose.yml
+Dockerfile
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini

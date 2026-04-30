@@ -1,45 +1,36 @@
-// Wrapper para DisCloud - Carrega .env e configura módulos antes de iniciar
-const fs = require('fs');
+// Wrapper de bootstrap para DisCloud.
+// Aponta para o backend multi-tenant em backend/src/index.js.
+//
+// No DisCloud, configure as variáveis pelo dashboard (NÃO confiar em .env).
+// As mesmas variáveis funcionam local via backend/.env.
+
 const path = require('path');
+const fs = require('fs');
 
-// Debug: verificar se .env existe
-const envPath = path.join(__dirname, '.env');
-console.log('📁 Checking .env file:');
-console.log('   Path:', envPath);
-console.log('   Exists:', fs.existsSync(envPath));
-
+// Carrega backend/.env se existir (modo local). DisCloud injeta via process.env já populado.
+const envPath = path.join(__dirname, 'backend', '.env');
 if (fs.existsSync(envPath)) {
-    const envContent = fs.readFileSync(envPath, 'utf8');
-    console.log('   Size:', envContent.length, 'bytes');
-    console.log('   Content preview:', envContent.substring(0, 200));
+    require('dotenv').config({ path: envPath });
 }
 
-// Carrega dotenv
-const result = require('dotenv').config({ path: envPath });
-console.log('   dotenv result:', result.error ? result.error.message : 'OK - loaded');
-
-// === FALLBACK: Se .env estiver vazio (DisCloud), define variáveis hardcoded ===
-if (!process.env.DB_HOST) {
-    console.log('⚠️  DB_HOST não definido pelo .env — aplicando fallback hardcoded');
-    process.env.DB_HOST = '129.80.149.224';
-    process.env.DB_PORT = '8080';
-    process.env.DB_USER = 'admin';
-    process.env.DB_PASS = 'SecurePass_WhatsApp_2026!';
-    process.env.DB_NAME = 'whatsapp_warming';
+// Defaults seguros para PORT (DisCloud sobrescreve via env)
+if (!process.env.PORT) {
+    process.env.PORT = process.env.WEB_PORT || '8080';
 }
 
-if (!process.env.FRONTEND_URL) {
-    process.env.FRONTEND_URL = 'https://wpp-advanced.discloud.app';
+// Sanidade: variáveis essenciais
+const required = ['DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASS', 'DB_NAME', 'JWT_SECRET', 'ADMIN_EMAIL', 'ADMIN_PASSWORD'];
+const missing = required.filter((k) => !process.env[k]);
+if (missing.length) {
+    console.error('❌ Variáveis de ambiente obrigatórias ausentes:', missing.join(', '));
+    console.error('   No DisCloud, configure-as no dashboard.');
+    console.error('   Localmente, edite backend/.env');
+    process.exit(1);
 }
 
-// Configura caminho dos módulos
-process.env.NODE_PATH = __dirname + '/node_modules';
-require('module').Module._initPaths();
+console.log('🚀 Bootstrap WPP multi-tenant');
+console.log('   PORT:', process.env.PORT);
+console.log('   DB_HOST:', process.env.DB_HOST);
 
-// Debug das variáveis de ambiente
-console.log('📁 ROOT INDEX - ENV DEBUG:');
-console.log('DB_HOST:', process.env.DB_HOST || 'NOT SET');
-console.log('DB_PORT:', process.env.DB_PORT || 'NOT SET');
-
-// Inicia o servidor (agora em src/ na raiz)
-require('./src/index.js');
+// Inicia o backend (que serve API + frontend estático)
+require('./backend/src/index.js');
