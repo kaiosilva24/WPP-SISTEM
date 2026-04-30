@@ -3,18 +3,23 @@ import io from 'socket.io-client'
 import './App.css'
 import whatsappFire from './assets/whatsapp_fire.png'
 import logoSvg from './assets/logo.svg'
-
-// Detecta a URL do backend dinamicamente
-// Em produção, usa a mesma origem da página (DisCloud)
-// Em desenvolvimento local, usa localhost:3000
-const API_URL = window.location.hostname === 'localhost'
-    ? 'http://localhost:3000'
-    : window.location.origin;
+import DispatchPanel from './components/dispatch/DispatchPanel'
+import InboxPanel from './components/dispatch/InboxPanel'
+import AdminPanel from './components/admin/AdminPanel'
+import { apiFetch, API_URL, getToken, setToken as setStoredToken } from './api'
 
 console.log('🌐 API URL:', API_URL);
 
-// Conecta ao backend via Socket.IO
-const socket = io(API_URL);
+// Socket criado dinamicamente com token. Sem token = sem socket.
+let socket = null;
+function createSocket() {
+    if (socket) { try { socket.disconnect(); } catch (_) {} }
+    const token = getToken();
+    if (!token) { socket = null; return null; }
+    socket = io(API_URL, { auth: { token } });
+    return socket;
+}
+if (getToken()) createSocket();
 
 function App() {
     const [accounts, setAccounts] = useState([]);
@@ -52,6 +57,8 @@ function App() {
     const [mediaLibrary, setMediaLibrary] = useState({ images: [], videos: [], stickers: [], audio: [], docs: [], vcards: [] });
     const [uploadingMedia, setUploadingMedia] = useState(false);
     const [activeTab, setActiveTab] = useState('proxy');
+    const [topView, setTopView] = useState('warmup');
+    const [socketReady, setSocketReady] = useState(!!socket);
     const [msgPopup, setMsgPopup] = useState(null); // 'first' | 'followup' | 'group' | null
     const [delayPopup, setDelayPopup] = useState(null); // 'first' | 'followup' | 'group' | null
     const [activeLogPanels, setActiveLogPanels] = useState([]); // Array [{id, name}]
@@ -99,42 +106,50 @@ function App() {
 
     // Auth: verifica token salvo ao iniciar
     useEffect(() => {
+        const onUnauthorized = () => {
+            setStoredToken(null);
+            setAuthToken(null);
+            setAuthUser(null);
+            setShowLoginModal(true);
+            if (socket) { try { socket.disconnect(); } catch (_) {} }
+            setSocketReady(false);
+        };
+        window.addEventListener('wpp:unauthorized', onUnauthorized);
+
         if (authToken) {
-            fetch('/api/auth/me', { headers: { Authorization: `Bearer ${authToken}` } })
+            apiFetch('/api/auth/me')
                 .then(r => r.ok ? r.json() : null)
                 .then(data => {
                     if (data?.user) {
                         setAuthUser(data.user);
+                        if (!socket) { createSocket(); setSocketReady(true); }
                     } else {
-                        // Token inválido ou expirado
-                        localStorage.removeItem('wpp_auth_token');
-                        setAuthToken(null);
-                        setAuthUser(null);
-                        setShowLoginModal(true);
+                        onUnauthorized();
                     }
                 })
-                .catch(() => {
-                    // Offline ou erro — mantém estado para tentar depois
-                });
+                .catch(() => {});
         } else {
             setShowLoginModal(true);
         }
+        return () => window.removeEventListener('wpp:unauthorized', onUnauthorized);
     }, []);
 
     const handleLogin = async () => {
         setLoginError('');
         setLoginLoading(true);
         try {
-            const res = await fetch('/api/auth/login', {
+            const res = await fetch(`${API_URL}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: loginEmail, password: loginPassword })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Erro ao entrar');
-            localStorage.setItem('wpp_auth_token', data.token);
+            setStoredToken(data.token);
             setAuthToken(data.token);
             setAuthUser(data.user);
+            createSocket();
+            setSocketReady(true);
             setShowLoginModal(false);
             setLoginEmail('');
             setLoginPassword('');
@@ -146,17 +161,36 @@ function App() {
     };
 
     const handleLogout = () => {
-        localStorage.removeItem('wpp_auth_token');
+        setStoredToken(null);
         setAuthToken(null);
         setAuthUser(null);
+        if (socket) { try { socket.disconnect(); } catch (_) {} }
+        setSocketReady(false);
         setShowLoginModal(true);
         setShowUserModal(false);
+    };
+
+    const setAccountMode = async (id, mode) => {
+        try {
+            const r = await apiFetch(`/api/accounts/${id}/mode`, {
+                method: 'PUT',
+                body: JSON.stringify({ mode })
+            });
+            if (!r.ok) {
+                const e = await r.json();
+                throw new Error(e.error || 'Erro');
+            }
+            setAccounts(accounts.map((a) => a.id === id ? { ...a, account_mode: mode } : a));
+            showToast(`Conta marcada como ${mode === 'dispatch' ? 'DISPARO' : 'AQUECIMENTO'}`, 'success');
+        } catch (e) {
+            showToast(e.message, 'error');
+        }
     };
 
     const loadSystemUsers = async () => {
         if (!authToken || authUser?.role !== 'admin') return;
         try {
-            const res = await fetch('/api/auth/users', { headers: { Authorization: `Bearer ${authToken}` } });
+            const res = await apiFetch('/api/auth/users', { headers: { Authorization: `Bearer ${authToken}` } });
             const data = await res.json();
             if (Array.isArray(data)) setSystemUsers(data);
         } catch { }
@@ -166,7 +200,7 @@ function App() {
         if (!newUserEmail || !newUserPassword) return showToast('Preencha e-mail e senha', 'warning');
         setUserActionLoading(true);
         try {
-            const res = await fetch('/api/auth/users', {
+            const res = await apiFetch('/api/auth/users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
                 body: JSON.stringify({ email: newUserEmail, password: newUserPassword, role: newUserRole })
@@ -186,7 +220,7 @@ function App() {
     const deleteSystemUser = async (id, email) => {
         if (!confirm(`Excluir usuário "${email}"?`)) return;
         try {
-            const res = await fetch(`/api/auth/users/${id}`, {
+            const res = await apiFetch(`/api/auth/users/${id}`, {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${authToken}` }
             });
@@ -198,8 +232,13 @@ function App() {
         }
     };
 
-    // Carrega contas ao iniciar
+    // Carrega contas ao iniciar (somente se autenticado e socket pronto)
     useEffect(() => {
+        if (!authToken || !authUser || !socketReady || !socket) return;
+        if (authUser.role === 'admin') {
+            setTopView('admin');
+            return;
+        }
         loadAccounts();
         loadStats();
         loadWebhooks();
@@ -290,6 +329,7 @@ function App() {
         });
 
         return () => {
+            if (!socket) return;
             socket.off('connect');
             socket.off('disconnect');
             socket.off('initial-state');
@@ -300,7 +340,7 @@ function App() {
             socket.off('session:disconnected');
             socket.off('account:log');
         };
-    }, []);
+    }, [authToken, authUser, socketReady]);
 
     // Força re-render a cada segundo para atualizar contadores de QR
     useEffect(() => {
@@ -317,7 +357,7 @@ function App() {
     // Funções de API
     const loadAccounts = async () => {
         try {
-            const response = await fetch('/api/accounts');
+            const response = await apiFetch('/api/accounts');
             const data = await response.json();
             console.log('📊 Contas carregadas:', data);
             setAccounts(data);
@@ -328,7 +368,7 @@ function App() {
 
     const loadStats = async () => {
         try {
-            const response = await fetch('/api/stats');
+            const response = await apiFetch('/api/stats');
             const data = await response.json();
             setStats(data);
         } catch (error) {
@@ -338,7 +378,7 @@ function App() {
 
     const loadWebhooks = async () => {
         try {
-            const response = await fetch('/api/webhooks');
+            const response = await apiFetch('/api/webhooks');
             const data = await response.json();
             setWebhooks(data);
         } catch (error) {
@@ -351,7 +391,7 @@ function App() {
             return showToast('Preencha nome e URL do Webhook', 'warning');
         }
         try {
-            const response = await fetch('/api/webhooks', {
+            const response = await apiFetch('/api/webhooks', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(newWebhook)
@@ -371,7 +411,7 @@ function App() {
     const deleteWebhookHandler = async (id) => {
         if (!confirm('Excluir este Webhook? Contas que o usam perderão o vínculo.')) return;
         try {
-            await fetch(`/api/webhooks/${id}`, { method: 'DELETE' });
+            await apiFetch(`/api/webhooks/${id}`, { method: 'DELETE' });
             showToast('Webhook removido', 'success');
             loadWebhooks();
         } catch (error) {
@@ -382,7 +422,7 @@ function App() {
     const createAccount = async (name) => {
         console.log('Criando conta:', name);
         try {
-            const response = await fetch('/api/accounts', {
+            const response = await apiFetch('/api/accounts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name })
@@ -423,7 +463,7 @@ function App() {
                 acc.id === id ? { ...acc, status: 'initializing' } : acc
             ));
 
-            const response = await fetch(`/api/accounts/${id}/start`, {
+            const response = await apiFetch(`/api/accounts/${id}/start`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ visible })
@@ -453,7 +493,7 @@ function App() {
                 acc.id === id ? { ...acc, status: 'initializing' } : acc
             ));
 
-            const response = await fetch(`/api/accounts/${id}/restart`, {
+            const response = await apiFetch(`/api/accounts/${id}/restart`, {
                 method: 'POST'
             });
 
@@ -474,7 +514,7 @@ function App() {
         if (!confirm('⚠️ Isso vai APAGAR a sessão salva desta conta.\n\nVocê precisará escanear o QR code novamente.\n\nDeseja continuar?')) return;
         try {
             showToast('Limpando sessão...', 'info');
-            const response = await fetch(`/api/accounts/${id}/clear-session`, {
+            const response = await apiFetch(`/api/accounts/${id}/clear-session`, {
                 method: 'POST'
             });
             if (response.ok) {
@@ -505,7 +545,7 @@ function App() {
             // Optimistic update
             setAccounts(accounts.map(acc => acc.id === id ? { ...acc, status: 'disconnected' } : acc));
 
-            await fetch(`/api/accounts/${id}/stop`, { method: 'POST' });
+            await apiFetch(`/api/accounts/${id}/stop`, { method: 'POST' });
             showToast('Sessão destruída e encerrada!', 'success');
             loadAccounts();
         } catch (error) {
@@ -518,7 +558,7 @@ function App() {
             // Optimistic update
             setAccounts(accounts.map(acc => acc.id === id ? { ...acc, isPaused: true, status: 'paused' } : acc));
 
-            await fetch(`/api/accounts/${id}/pause`, { method: 'POST' });
+            await apiFetch(`/api/accounts/${id}/pause`, { method: 'POST' });
             showToast('Conta em PAUSA (Standby / Modo Avião)!', 'warning');
             loadAccounts();
         } catch (error) {
@@ -532,7 +572,7 @@ function App() {
             // Optimistic update
             setAccounts(accounts.map(acc => acc.id === id ? { ...acc, isPaused: false, status: 'ready' } : acc));
 
-            await fetch(`/api/accounts/${id}/resume`, { method: 'POST' });
+            await apiFetch(`/api/accounts/${id}/resume`, { method: 'POST' });
             showToast('Conta retomada com sucesso!', 'success');
             loadAccounts();
         } catch (error) {
@@ -545,7 +585,7 @@ function App() {
         if (!confirm('Tem certeza que deseja deletar esta conta?')) return;
 
         try {
-            await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
+            await apiFetch(`/api/accounts/${id}`, { method: 'DELETE' });
             showToast('Conta deletada', 'success');
             loadAccounts();
         } catch (error) {
@@ -560,7 +600,7 @@ function App() {
         setMediaLibrary({ images: [], videos: [], stickers: [], audio: [], docs: [], vcards: [] });
 
         try {
-            const response = await fetch(`/api/accounts/${id}`);
+            const response = await apiFetch(`/api/accounts/${id}`);
             const account = await response.json();
 
             // Converte ms -> segundos para exibir na UI
@@ -737,7 +777,7 @@ function App() {
         };
 
         try {
-            const response = await fetch(`/api/accounts/${currentAccountId}/config`, {
+            const response = await apiFetch(`/api/accounts/${currentAccountId}/config`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
@@ -770,7 +810,7 @@ function App() {
         showToast('Testando proxy...', 'info');
 
         try {
-            const response = await fetch('/api/test-proxy', {
+            const response = await apiFetch('/api/test-proxy', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -801,18 +841,18 @@ function App() {
     const loadMessages = async (id) => {
         try {
             const [first, followup, group] = await Promise.all([
-                fetch(`/api/accounts/${id}/messages?type=first`).then(r => r.json()),
-                fetch(`/api/accounts/${id}/messages?type=followup`).then(r => r.json()),
-                fetch(`/api/accounts/${id}/messages?type=group`).then(r => r.json()),
+                apiFetch(`/api/accounts/${id}/messages?type=first`).then(r => r.json()),
+                apiFetch(`/api/accounts/${id}/messages?type=followup`).then(r => r.json()),
+                apiFetch(`/api/accounts/${id}/messages?type=group`).then(r => r.json()),
             ]);
             const total = (first?.length || 0) + (followup?.length || 0) + (group?.length || 0);
             // Auto-seed: se não tem nenhuma mensagem, insere as padrões automaticamente
             if (total === 0) {
-                await fetch(`/api/accounts/${id}/messages/seed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                await apiFetch(`/api/accounts/${id}/messages/seed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
                 const [f2, fu2, g2] = await Promise.all([
-                    fetch(`/api/accounts/${id}/messages?type=first`).then(r => r.json()),
-                    fetch(`/api/accounts/${id}/messages?type=followup`).then(r => r.json()),
-                    fetch(`/api/accounts/${id}/messages?type=group`).then(r => r.json()),
+                    apiFetch(`/api/accounts/${id}/messages?type=first`).then(r => r.json()),
+                    apiFetch(`/api/accounts/${id}/messages?type=followup`).then(r => r.json()),
+                    apiFetch(`/api/accounts/${id}/messages?type=group`).then(r => r.json()),
                 ]);
                 setCustomMessages({ first: f2, followup: fu2, group: g2 });
             } else {
@@ -828,7 +868,7 @@ function App() {
         if (lines.length === 0) return showToast('Digite pelo menos uma mensagem', 'warning');
         try {
             for (const line of lines) {
-                await fetch(`/api/accounts/${currentAccountId}/messages`, {
+                await apiFetch(`/api/accounts/${currentAccountId}/messages`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message_type: newMessage.type, message_text: line })
@@ -844,7 +884,7 @@ function App() {
 
     const deleteMessage = async (msgId) => {
         try {
-            await fetch(`/api/accounts/${currentAccountId}/messages/${msgId}`, { method: 'DELETE' });
+            await apiFetch(`/api/accounts/${currentAccountId}/messages/${msgId}`, { method: 'DELETE' });
             await loadMessages(currentAccountId);
             showToast('Mensagem removida', 'success');
         } catch (e) {
@@ -855,7 +895,7 @@ function App() {
     const seedMessages = async (force = false) => {
         try {
             showToast(force ? 'Recriando mensagens padrão...' : 'Carregando mensagens padrão...', 'info');
-            const res = await fetch(`/api/accounts/${currentAccountId}/messages/seed`, {
+            const res = await apiFetch(`/api/accounts/${currentAccountId}/messages/seed`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ force })
@@ -871,7 +911,7 @@ function App() {
     // ---- Media helpers ----
     const loadMedia = async () => {
         try {
-            const data = await fetch('/api/accounts/media/library').then(r => r.json());
+            const data = await apiFetch('/api/accounts/media/library').then(r => r.json());
             setMediaLibrary({
                 images: data.images || [],
                 videos: data.videos || [],
@@ -892,7 +932,7 @@ function App() {
         try {
             const fd = new FormData();
             for (let i = 0; i < files.length; i++) fd.append('files', files[i]);
-            const res = await fetch(`/api/accounts/media/upload/${category}`, { method: 'POST', body: fd });
+            const res = await apiFetch(`/api/accounts/media/upload/${category}`, { method: 'POST', body: fd });
             if (!res.ok) {
                 const err = await res.json();
                 throw new Error(err.error || 'Erro no upload');
@@ -911,7 +951,7 @@ function App() {
     const deleteMedia = async (category, filename) => {
         if (!confirm(`Deletar "${filename}"?`)) return;
         try {
-            await fetch(`/api/accounts/media/${category}/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+            await apiFetch(`/api/accounts/media/${category}/${encodeURIComponent(filename)}`, { method: 'DELETE' });
             await loadMedia();
             showToast('Arquivo deletado', 'success');
         } catch (e) {
@@ -922,7 +962,7 @@ function App() {
     const deleteAllMedia = async (category, label) => {
         if (!confirm(`Deletar TODOS os arquivos de ${label}?`)) return;
         try {
-            const res = await fetch(`/api/accounts/media/clear/${category}`, { method: 'DELETE' });
+            const res = await apiFetch(`/api/accounts/media/clear/${category}`, { method: 'DELETE' });
             const data = await res.json();
             await loadMedia();
             showToast(`${data.deleted} arquivo(s) deletado(s) de ${label}`, 'success');
@@ -1133,6 +1173,36 @@ function App() {
                 </div>
             </header>
 
+            {authUser && (
+                <nav style={{ display: 'flex', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: 12 }}>
+                    {authUser.role === 'admin' && (
+                        <button className={`btn ${topView === 'admin' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTopView('admin')}>Admin</button>
+                    )}
+                    {authUser.role === 'customer' && <>
+                        <button className={`btn ${topView === 'warmup' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTopView('warmup')}>Aquecimento</button>
+                        <button className={`btn ${topView === 'dispatch' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTopView('dispatch')}>Disparo</button>
+                        <button className={`btn ${topView === 'inbox' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTopView('inbox')}>Inbox</button>
+                    </>}
+                    <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, opacity: 0.8 }}>
+                        {authUser.email} ({authUser.role})
+                        <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={handleLogout}>Sair</button>
+                    </span>
+                </nav>
+            )}
+
+            {authUser && authUser.role === 'admin' && topView === 'admin' && (
+                <AdminPanel />
+            )}
+
+            {authUser && authUser.role === 'customer' && topView === 'dispatch' && socketReady && socket && (
+                <DispatchPanel socket={socket} accounts={accounts} />
+            )}
+
+            {authUser && authUser.role === 'customer' && topView === 'inbox' && socketReady && socket && (
+                <InboxPanel socket={socket} accounts={accounts} />
+            )}
+
+            {authUser && authUser.role === 'customer' && topView === 'warmup' && (<>
             <section className="stats-section">
                 <div className="stats-grid">
                     <div className="stat-card">
@@ -1206,6 +1276,22 @@ function App() {
                                 <div className="account-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div className="account-name">{account.name}</div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <select
+                                            value={account.account_mode || 'warmup'}
+                                            onChange={(e) => setAccountMode(account.id, e.target.value)}
+                                            title="Modo da conta"
+                                            style={{
+                                                fontSize: 11,
+                                                padding: '2px 6px',
+                                                background: account.account_mode === 'dispatch' ? 'rgba(255,193,7,0.15)' : 'rgba(37,211,102,0.15)',
+                                                border: `1px solid ${account.account_mode === 'dispatch' ? '#ffc107' : '#25D366'}`,
+                                                color: account.account_mode === 'dispatch' ? '#ffc107' : '#25D366',
+                                                borderRadius: 4
+                                            }}
+                                        >
+                                            <option value="warmup">Aquecimento</option>
+                                            <option value="dispatch">Disparo</option>
+                                        </select>
                                         {/* Botão de Leads Novos (Sempre visível se conectado) */}
                                         {['ready', 'authenticated', 'paused'].includes(account.status) && (
                                             <button
@@ -2065,7 +2151,7 @@ function App() {
                                                     title={groupState ? `Desativar Grupos para ${acc.name}` : `Ativar Grupos para ${acc.name}`}
                                                     onClick={async () => {
                                                         const newVal = !groupState;
-                                                        await fetch(`/api/accounts/${acc.id}/config`, {
+                                                        await apiFetch(`/api/accounts/${acc.id}/config`, {
                                                             method: 'PUT',
                                                             headers: { 'Content-Type': 'application/json' },
                                                             body: JSON.stringify({ group_enabled: newVal })
@@ -2100,8 +2186,8 @@ function App() {
                                                         setShowGroupBlacklistModal(true);
                                                         try {
                                                             const [groupsRes, blRes] = await Promise.all([
-                                                                fetch(`/api/accounts/${acc.id}/groups`),
-                                                                fetch(`/api/accounts/${acc.id}/group-blacklist`)
+                                                                apiFetch(`/api/accounts/${acc.id}/groups`),
+                                                                apiFetch(`/api/accounts/${acc.id}/group-blacklist`)
                                                             ]);
                                                             const groups = groupsRes.ok ? await groupsRes.json() : [];
                                                             const blacklisted = blRes.ok ? await blRes.json() : [];
@@ -2409,7 +2495,7 @@ function App() {
                                                             <button className="btn btn-sm btn-success" onClick={async () => {
                                                                 if (!window.confirm(`Tem certeza que deseja executar o webhook "${wh.name}" agora?`)) return;
                                                                 try {
-                                                                    const res = await fetch(`/api/webhooks/${wh.id}/execute`, { method: 'POST' });
+                                                                    const res = await apiFetch(`/api/webhooks/${wh.id}/execute`, { method: 'POST' });
                                                                     const result = await res.json();
                                                                     if (res.ok && result.success) {
                                                                         showToast('Webhook executado com sucesso!', 'success');
@@ -2465,7 +2551,7 @@ function App() {
                                             // Função helper para auto-salvar campo individual do agendamento
                                             const autoSaveScheduleField = async (fields) => {
                                                 try {
-                                                    const res = await fetch(`/api/accounts/${acc.id}/config`, {
+                                                    const res = await apiFetch(`/api/accounts/${acc.id}/config`, {
                                                         method: 'PUT',
                                                         headers: { 'Content-Type': 'application/json' },
                                                         body: JSON.stringify(fields)
@@ -2651,7 +2737,9 @@ function App() {
                 })()
             }
 
-            {/* ================== LOGIN MODAL ================== */}
+            </>)}{/* Fim do bloco warmup */}
+
+            {/* ================== LOGIN MODAL (sempre disponível) ================== */}
             {showLoginModal && (
                 <div style={{
                     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -2974,7 +3062,7 @@ function App() {
                                                 onClick={async () => {
                                                     try {
                                                         if (isBlocked) {
-                                                            await fetch(`/api/accounts/${groupBlacklistAccountId}/group-blacklist`, {
+                                                            await apiFetch(`/api/accounts/${groupBlacklistAccountId}/group-blacklist`, {
                                                                 method: 'DELETE',
                                                                 headers: { 'Content-Type': 'application/json' },
                                                                 body: JSON.stringify({ group_jid: g.jid })
@@ -2984,7 +3072,7 @@ function App() {
                                                                 blacklisted: prev.blacklisted.filter(b => b.group_jid !== g.jid)
                                                             }));
                                                         } else {
-                                                            await fetch(`/api/accounts/${groupBlacklistAccountId}/group-blacklist`, {
+                                                            await apiFetch(`/api/accounts/${groupBlacklistAccountId}/group-blacklist`, {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
                                                                 body: JSON.stringify({ group_jid: g.jid, group_name: g.name })
