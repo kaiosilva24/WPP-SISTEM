@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../database/DatabaseManager');
 const sessionManager = require('../services/SessionManager');
+const messageTemplates = require('../utils/messageTemplates');
 const { requireAuth, requireCustomer, requireActiveSubscription } = require('../middleware/auth');
 
 // Todas as rotas de accounts exigem cliente autenticado com assinatura válida
@@ -92,6 +93,40 @@ router.delete('/:id/messages/:messageId', async (req, res) => {
     try {
         await tdb(req).deleteAccountMessage(req.params.messageId);
         res.status(204).send();
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/accounts/:id/messages/seed — popula com templates padrão
+router.post('/:id/messages/seed', async (req, res) => {
+    try {
+        const account = await tdb(req).getAccount(req.params.id);
+        if (!account) return res.status(404).json({ error: 'Conta não encontrada' });
+
+        const accountId = parseInt(req.params.id, 10);
+        const force = !!(req.body && req.body.force);
+
+        if (!force) {
+            const existing = await tdb(req).getAccountMessages(accountId);
+            if (existing && existing.length > 0) {
+                return res.json({ inserted: 0, skipped: existing.length, reason: 'Já possui mensagens' });
+            }
+        }
+
+        const buckets = [
+            { type: 'first', items: messageTemplates.firstResponseTemplates },
+            { type: 'followup', items: messageTemplates.followUpTemplates },
+            { type: 'group', items: messageTemplates.groupGreetings }
+        ];
+
+        let inserted = 0;
+        for (const bucket of buckets) {
+            for (const text of bucket.items) {
+                await tdb(req).addAccountMessage(accountId, bucket.type, text);
+                inserted++;
+            }
+        }
+
+        res.json({ inserted });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

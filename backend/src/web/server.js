@@ -10,10 +10,12 @@ const accountsRouter = require('../api/accounts');
 const dispatchRouter = require('../api/dispatch');
 const authRouter = require('../api/auth');
 const adminRouter = require('../api/admin');
+const axios = require('axios');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 const dispatchEngine = require('../services/DispatchEngine');
 const dispatchAutoReply = require('../services/DispatchAutoReply');
 const db = require('../database/DatabaseManager');
-const { verifyToken } = require('../middleware/auth');
+const { verifyToken, requireAuth } = require('../middleware/auth');
 
 class WebServer {
     constructor() {
@@ -53,6 +55,36 @@ class WebServer {
 
         // públicas
         this.app.use('/api/auth', authRouter);
+
+        // POST /api/test-proxy — valida proxy via ip-api.com (qualquer usuário autenticado)
+        this.app.post('/api/test-proxy', requireAuth, async (req, res) => {
+            try {
+                const { ip, port, username, password } = req.body || {};
+                if (!ip || !port) {
+                    return res.status(400).json({ success: false, error: 'IP e porta obrigatórios' });
+                }
+                const auth = (username && password) ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : '';
+                const proxyUrl = `http://${auth}${ip}:${port}`;
+                const agent = new HttpsProxyAgent(proxyUrl);
+                const response = await axios.get('http://ip-api.com/json/', {
+                    httpAgent: agent,
+                    httpsAgent: agent,
+                    timeout: 10000
+                });
+                if (response.data && response.data.status === 'success') {
+                    return res.json({
+                        success: true,
+                        ip: response.data.query,
+                        isp: response.data.isp || response.data.org || null,
+                        country: response.data.country || null,
+                        city: response.data.city || null
+                    });
+                }
+                return res.json({ success: false, error: (response.data && response.data.message) || 'Falha ao validar proxy' });
+            } catch (e) {
+                return res.json({ success: false, error: e.message });
+            }
+        });
 
         // protegidas
         this.app.use('/api/admin', adminRouter);
