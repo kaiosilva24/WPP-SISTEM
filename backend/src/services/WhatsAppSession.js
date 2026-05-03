@@ -291,36 +291,24 @@ class WhatsAppSession extends EventEmitter {
     }
 
     async _onMessagesUpsert({ messages, type }) {
-        logger.info(this.accountName, `📥 messages.upsert (type=${type}, count=${messages ? messages.length : 0})`);
-        if (type !== 'notify' && type !== 'append') {
-            logger.debug(this.accountName, `⏭️  ignorando upsert type=${type}`);
-            return;
-        }
+        // Log inicial em DEBUG (não aparece no painel ao vivo) — Baileys emite muitos
+        // upserts vazios (protocol/recibo/echo) que poluem o log INFO.
+        logger.debug(this.accountName, `📥 messages.upsert (type=${type}, count=${messages ? messages.length : 0})`);
+
+        if (type !== 'notify' && type !== 'append') return;
 
         const HORIZON_SEC = 24 * 60 * 60; // 24h pra histórico
         const nowSec = Math.floor(Date.now() / 1000);
         let emitted = 0;
 
         for (const m of messages) {
-            if (!m || !m.message) {
-                logger.debug(this.accountName, '⏭️  msg sem .message (provável protocol/notification)');
-                continue;
-            }
-            if (m.key && m.key.fromMe) {
-                logger.debug(this.accountName, `⏭️  fromMe (jid=${m.key.remoteJid})`);
-                continue;
-            }
+            if (!m || !m.message) continue;
+            if (m.key && m.key.fromMe) continue;
             // Dedup append+notify
             const seen = this._markMsgSeen(m.key && m.key.id);
-            if (seen) {
-                logger.debug(this.accountName, `⏭️  msg id já vista: ${m.key.id}`);
-                continue;
-            }
+            if (seen) continue;
             // Janela de 24h só pra histórico (append)
-            if (type === 'append' && m.messageTimestamp && (nowSec - Number(m.messageTimestamp)) > HORIZON_SEC) {
-                logger.debug(this.accountName, `⏭️  append antigo ignorado (jid=${m.key.remoteJid})`);
-                continue;
-            }
+            if (type === 'append' && m.messageTimestamp && (nowSec - Number(m.messageTimestamp)) > HORIZON_SEC) continue;
 
             const adapted = this._adaptBaileysMessage(m);
             logger.info(this.accountName,
@@ -332,7 +320,8 @@ class WhatsAppSession extends EventEmitter {
             emitted++;
         }
 
-        if (type === 'append') {
+        // Loga histórico só quando algo foi de fato entregue (evita poluição com "0 entregues")
+        if (type === 'append' && emitted > 0) {
             logger.info(this.accountName, `📜 histórico: ${messages.length} msgs sync, ${emitted} entregues à fila`);
         }
     }
