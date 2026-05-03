@@ -5,6 +5,9 @@ const logger = require('../utils/logger');
 const { delay, getHumanBehaviorSequence, simulateTyping, simulateRecording, formatDelay } = require('../utils/humanBehavior');
 const { getFirstResponse, getFollowUpResponse, getGroupGreeting } = require('../utils/messageTemplates');
 
+// Lazy import pra evitar circular dependency (SessionManager -> WhatsAppSession -> MessageHandler).
+function _sm() { return require('./SessionManager'); }
+
 /**
  * Gerenciador de mensagens com comportamento humano (versão dinâmica)
  */
@@ -265,6 +268,19 @@ class MessageHandler {
     }
 
     /**
+     * Resolve a sessão atual no SessionManager. Importante porque a sessão pode ter
+     * sido destruída e recriada (ex: pause/resume) entre iterações do drain — não
+     * podemos capturar a referência inicial e usar pra sempre.
+     */
+    _resolveSession(initialSession) {
+        try {
+            const sm = _sm();
+            const cur = sm.getSession(initialSession.tenantId, initialSession.accountId);
+            return cur || null;
+        } catch (_) { return null; }
+    }
+
+    /**
      * Drena a fila de UM chat. Para cada rajada (snapshot do batch atual):
      *   1. readDelay aleatório — comportamento humano: "ainda não vi a mensagem"
      *   2. markRead em todas as msgs do snapshot — ticket azul
@@ -272,11 +288,21 @@ class MessageHandler {
      *   4. (se não houver texto) → loga "lidas, sem texto pra responder"
      *
      * Se durante a resposta chegarem mais msgs no batch, faz outra rodada (nova rajada).
+     * Se a sessão for destruída no meio, o drain é suspenso (batch preservado) e
+     * será retomado por `resumeDrainsForAccount` quando a nova sessão ficar ready.
      */
-    async _drainChat(session, contactId, q) {
-        const cfg = this.getAccountConfig(session);
+    async _drainChat(initialSession, contactId, q) {
+        const cfg = this.getAccountConfig(initialSession);
+        const accountName = initialSession.accountName;
 
         while (q.batch.length > 0) {
+            // Resolve session ATUAL — pode ter mudado (pause/resume substitui instância)
+            let session = this._resolveSession(initialSession);
+            if (!session || session.status !== 'ready' || !session.sock) {
+                logger.warn(accountName,
+                    `⏸️  drain ${contactId} suspenso: sessão não está ready (status=${session ? session.status : 'inexistente'}). batch=${q.batch.length} msg(s) preservadas — retoma quando reconectar`);
+                return; // mantém batch — resumeDrainsForAccount retoma quando nova session ready
+            }
             const snapshot = q.batch.slice();
             q.batch.length = 0;
 
@@ -333,17 +359,59 @@ class MessageHandler {
             await this._waitGlobalPause(session, contactId);
             await this._waitRateLimit(session, contactId);
 
+            // Re-resolve session DEPOIS dos waits — pause/resume pode ter substituído.
+            session = this._resolveSession(initialSession);
+            if (!session || session.status !== 'ready' || !session.sock) {
+                logger.warn(accountName,
+                    `⏸️  drain ${contactId} aborta envio: sessão deixou de estar ready durante espera (status=${session ? session.status : 'inexistente'}). batch=${q.batch.length}`);
+                // Re-empurra o target pro batch pra ser tentado de novo quando a sessão voltar
+                q.batch.unshift(target);
+                return;
+            }
+
             // Lock global por sessão: só 1 chat por vez digita+envia
             try {
                 await this._withSessionSendLock(session, contactId, async () => {
-                    await this.processNormalMessage(session, contactId, target);
+                    // Revalida ANTES do envio efetivo (lock pode ter esperado segundos)
+                    const live = this._resolveSession(initialSession);
+                    if (!live || live.status !== 'ready' || !live.sock) {
+                        logger.warn(accountName,
+                            `⏸️  envio cancelado pra ${contactId}: sessão não está mais ready (status=${live ? live.status : 'inexistente'})`);
+                        q.batch.unshift(target);
+                        return;
+                    }
+                    await this.processNormalMessage(live, contactId, target);
                 });
             } catch (e) {
-                logger.error(session.accountName, `Falha drenando ${contactId}: ${e.message}\n${e.stack || ''}`);
+                logger.error(accountName, `Falha drenando ${contactId}: ${e.message}\n${e.stack || ''}`);
             }
 
             // Após cada resposta, snapshot atualizado
             this._logQueueSnapshot(session);
+        }
+    }
+
+    /**
+     * Quando uma sessão fica ready (boot ou reconexão pós-pause), retoma os drains
+     * dos chats dessa conta que ficaram com batch pendente.
+     */
+    resumeDrainsForAccount(session) {
+        if (!session || !session.accountId) return;
+        const prefix = `${session.accountId}:`;
+        let resumed = 0;
+        for (const [key, q] of this.chatQueues.entries()) {
+            if (!key.startsWith(prefix)) continue;
+            if (q.batch.length === 0) continue;
+            if (q.processing) continue;
+            const contactId = key.slice(prefix.length);
+            q.processing = true;
+            this._drainChat(session, contactId, q)
+                .catch((e) => logger.error(session.accountName, `Drain retomado ${contactId} crashou: ${e.message}`))
+                .finally(() => { q.processing = false; });
+            resumed++;
+        }
+        if (resumed > 0) {
+            logger.info(session.accountName, `🔁 retomando ${resumed} drain(s) pendente(s) após reconexão`);
         }
     }
 
@@ -424,6 +492,13 @@ class MessageHandler {
      * presença adequada (digitando OU gravando), responseDelay, envio.
      */
     async processNormalMessage(session, contactId, message = null) {
+        // Defensivo: aborta se a sessão não está pronta (caso _drainChat não tenha
+        // pego). Sem isso, sendMessage joga "Cliente não está pronto (sem socket)".
+        if (!session || session.status !== 'ready' || !session.sock) {
+            logger.warn(session ? session.accountName : null,
+                `❌ processNormalMessage pra ${contactId} abortado: status=${session ? session.status : 'null'}`);
+            return;
+        }
         const t0 = Date.now();
         try {
             const config = this.getAccountConfig(session);

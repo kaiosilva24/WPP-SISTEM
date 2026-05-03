@@ -73,7 +73,7 @@ async function expirySweep() {
 }
 
 // Marca de versão usada no boot pra confirmar qual build está realmente rodando.
-const BUILD_TAG = 'pause-sem-logout-preserva-creds-2026-05-03k';
+const BUILD_TAG = 'drain-resilient-resume-2026-05-03l';
 
 async function main() {
     try {
@@ -104,6 +104,9 @@ async function main() {
             const session = sessionManager.getSession(tenantId, accountId);
             if (session) {
                 setTimeout(() => messageHandler.processUnreadMessages(session), 5000);
+                // Retoma drains dos chats que ficaram com batch pendente quando a
+                // sessão estava destruída (ex: durante pause/resume).
+                setTimeout(() => messageHandler.resumeDrainsForAccount(session), 2000);
             }
         });
 
