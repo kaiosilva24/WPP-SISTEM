@@ -14,6 +14,7 @@ const {
 const logger = require('../utils/logger');
 const db = require('../database/DatabaseManager');
 const { usePostgresAuthState } = require('./baileysAuthState');
+const { ensureOggOpus, isFFmpegAvailable } = require('../utils/audioConvert');
 
 const baileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL || 'silent' });
 
@@ -412,35 +413,67 @@ class WhatsAppSession extends EventEmitter {
         if (!filePath || !fs.existsSync(filePath)) {
             throw new Error(`Arquivo de mídia não encontrado: ${filePath}`);
         }
-        const buf = fs.readFileSync(filePath);
         const filename = path.basename(filePath);
         const kind = mediaTypeFromExt(filename);
 
-        // fileName aleatório a cada envio: disfarça reenvio do mesmo arquivo.
+        // fileName aleatório (disfarça reenvio); usado nos tipos não-PTT.
         const ext = path.extname(filename).toLowerCase();
         const randomFileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
 
-        // Mimetype correto por extensão
-        const audioMime =
-            ext === '.ogg' ? 'audio/ogg; codecs=opus' :
-            ext === '.m4a' ? 'audio/mp4' :
-            ext === '.wav' ? 'audio/wav' :
-            'audio/mpeg'; // mp3 default
+        // ===== Áudio: tenta PTT (OGG/Opus) — único formato confiável no mobile =====
+        if (kind === 'audio') {
+            let oggPath = null;
+            try {
+                oggPath = await ensureOggOpus(filePath);
+            } catch (e) {
+                logger.warn(this.accountName,
+                    `Conversão pra OGG/Opus falhou (${e.message}) — caindo pra áudio NÃO-PTT (toca no PC mas pode falhar no mobile)`);
+            }
 
+            if (oggPath) {
+                const oggBuf = fs.readFileSync(oggPath);
+                logger.info(this.accountName,
+                    `🎵 mídia → ${jid}: ${filename} → ${path.basename(oggPath)} (kind=audio, PTT=true, mime=audio/ogg;codecs=opus)`);
+                await this.sock.sendMessage(jid, {
+                    audio: oggBuf,
+                    mimetype: 'audio/ogg; codecs=opus',
+                    ptt: true
+                });
+            } else {
+                // Fallback: não-PTT (some mobile clients accept; PC sempre toca)
+                const buf = fs.readFileSync(filePath);
+                const audioMime =
+                    ext === '.ogg' ? 'audio/ogg; codecs=opus' :
+                    ext === '.m4a' ? 'audio/mp4' :
+                    ext === '.wav' ? 'audio/wav' :
+                    'audio/mpeg';
+                logger.info(this.accountName,
+                    `🎵 mídia → ${jid}: ${filename} (kind=audio, PTT=false fallback, mime=${audioMime})`);
+                await this.sock.sendMessage(jid, {
+                    audio: buf,
+                    mimetype: audioMime,
+                    ptt: false,
+                    fileName: randomFileName
+                });
+            }
+            this.stats.messagesSent++;
+            this.stats.lastActivity = Date.now();
+            this.emit('message:sent');
+            return;
+        }
+
+        // ===== Outros tipos =====
+        const buf = fs.readFileSync(filePath);
         let payload;
         switch (kind) {
             case 'image':   payload = { image: buf, caption: caption || undefined, fileName: randomFileName }; break;
             case 'video':   payload = { video: buf, caption: caption || undefined, fileName: randomFileName }; break;
-            // PTT (voice note): aparece com a foto do perfil + waveform, sem nome de arquivo.
-            // SEM fileName no payload — PTT não exibe nome.
-            case 'audio':   payload = { audio: buf, mimetype: audioMime, ptt: true }; break;
             case 'sticker': payload = { sticker: buf, fileName: randomFileName }; break;
             case 'vcard':   payload = { document: buf, mimetype: 'text/vcard', fileName: randomFileName }; break;
             default:        payload = { document: buf, mimetype: 'application/octet-stream', fileName: randomFileName, caption: caption || undefined };
         }
 
-        const aliasLabel = kind === 'audio' ? `(PTT, mime=${audioMime})` : `(alias=${randomFileName})`;
-        logger.info(this.accountName, `🎵 mídia → ${jid}: ${filename} (kind=${kind}) ${aliasLabel}`);
+        logger.info(this.accountName, `🎵 mídia → ${jid}: ${filename} (kind=${kind}, alias=${randomFileName})`);
 
         await this.sock.sendMessage(jid, payload);
         this.stats.messagesSent++;

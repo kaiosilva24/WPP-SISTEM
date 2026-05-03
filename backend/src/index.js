@@ -73,7 +73,7 @@ async function expirySweep() {
 }
 
 // Marca de versão usada no boot pra confirmar qual build está realmente rodando.
-const BUILD_TAG = 'ptt-voice-lock-global-interaction-2026-05-03e';
+const BUILD_TAG = 'audio-ogg-opus-mobile-2026-05-03f';
 
 async function main() {
     try {
