@@ -72,10 +72,14 @@ async function expirySweep() {
     }
 }
 
+// Marca de versão usada no boot pra confirmar qual build está realmente rodando.
+const BUILD_TAG = 'baileys-tdb-fix-2026-05-03b';
+
 async function main() {
     try {
         console.log('\n' + '='.repeat(60));
         console.log('🔥 SISTEMA WPP MULTI-TENANT v3.0');
+        console.log(`   build: ${BUILD_TAG}`);
         console.log('='.repeat(60) + '\n');
 
         logger.info(null, 'Inicializando schema global (public)...');
