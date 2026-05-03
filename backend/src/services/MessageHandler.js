@@ -293,33 +293,44 @@ class MessageHandler {
     }
 
     /**
-     * Envia mídia aleatória
+     * Envia mídia aleatória. Procura na pasta do tenant e cai pra defaults globais.
+     * Estrutura esperada: media/[tenant-N/]{images,videos,stickers,audio}/<arquivo>
      */
     async sendRandomMedia(session, contactId) {
         try {
-            const mediaFolder = './media';
+            const baseRoot = path.join(__dirname, '..', '..', '..', 'media');
+            const tenantSegment = session.tenantId ? `tenant-${session.tenantId}` : null;
+            const candidates = [];
+            const subcats = ['images', 'videos', 'stickers', 'audio'];
+            const exts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.mp3', '.ogg', '.m4a'];
 
-            if (!fs.existsSync(mediaFolder)) {
-                logger.warn(session.accountName, 'Pasta de mídia não encontrada');
-                return;
+            const collect = (dir) => {
+                if (!fs.existsSync(dir)) return;
+                for (const f of fs.readdirSync(dir)) {
+                    if (f.startsWith('.')) continue;
+                    const full = path.join(dir, f);
+                    try {
+                        if (fs.statSync(full).isFile() && exts.some((e) => f.toLowerCase().endsWith(e))) {
+                            candidates.push(full);
+                        }
+                    } catch (_) {}
+                }
+            };
+
+            for (const cat of subcats) {
+                if (tenantSegment) collect(path.join(baseRoot, tenantSegment, cat));
+                collect(path.join(baseRoot, cat));
             }
 
-            const mediaTypes = ['.jpg', '.png', '.mp4', '.mp3', '.webp'];
-            const files = fs.readdirSync(mediaFolder)
-                .filter(file => mediaTypes.some(type => file.toLowerCase().endsWith(type)));
-
-            if (files.length === 0) {
+            if (candidates.length === 0) {
                 logger.warn(session.accountName, 'Nenhum arquivo de mídia encontrado');
                 return;
             }
 
-            const randomFile = files[Math.floor(Math.random() * files.length)];
-            const mediaPath = path.join(mediaFolder, randomFile);
-
+            const mediaPath = candidates[Math.floor(Math.random() * candidates.length)];
             await session.sendMedia(contactId, mediaPath);
 
-            logger.messageSent(session.accountName, contactId, `Mídia (${randomFile})`);
-
+            logger.messageSent(session.accountName, contactId, `Mídia (${path.basename(mediaPath)})`);
         } catch (error) {
             logger.error(session.accountName, `Erro ao enviar mídia: ${error.message}`);
         }

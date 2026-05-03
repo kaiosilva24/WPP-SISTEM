@@ -23,23 +23,38 @@ function tenantMediaDir(req, category) {
     return path.join(MEDIA_ROOT, tenant, category);
 }
 
+function defaultMediaDir(category) {
+    return path.join(MEDIA_ROOT, category);
+}
+
 function ensureDir(dir) {
     try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
 }
 
-function listMediaCategory(req, category) {
-    const dir = tenantMediaDir(req, category);
-    ensureDir(dir);
+function readEntries(dir, urlPrefix, isDefault) {
     try {
         return fs.readdirSync(dir)
             .filter((f) => !f.startsWith('.'))
+            .filter((f) => {
+                try { return fs.statSync(path.join(dir, f)).isFile(); } catch (_) { return false; }
+            })
             .map((f) => {
                 const full = path.join(dir, f);
                 let size = 0;
                 try { size = fs.statSync(full).size; } catch (_) {}
-                return { name: f, size, url: `/media/tenant-${req.user.tenantId}/${category}/${encodeURIComponent(f)}` };
+                return { name: f, size, url: `${urlPrefix}/${encodeURIComponent(f)}`, isDefault: !!isDefault };
             });
     } catch (_) { return []; }
+}
+
+function listMediaCategory(req, category) {
+    const tenantDir = tenantMediaDir(req, category);
+    ensureDir(tenantDir);
+    const tenantFiles = readEntries(tenantDir, `/media/tenant-${req.user.tenantId}/${category}`, false);
+    const defaults = readEntries(defaultMediaDir(category), `/media/${category}`, true);
+    const seen = new Set(tenantFiles.map((e) => e.name));
+    const merged = tenantFiles.concat(defaults.filter((e) => !seen.has(e.name)));
+    return merged;
 }
 
 const mediaUpload = multer({

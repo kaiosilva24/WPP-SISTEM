@@ -57,6 +57,14 @@ function saveToFile(level, sessionId, message) {
 }
 
 /**
+ * Broadcaster opcional para enviar logs a clientes em tempo real
+ * (ex: socket.io). Registrado por web/server.js após criar o io.
+ *   fn(level, sessionId, message, isoTimestamp)
+ */
+let _broadcaster = null;
+function setBroadcaster(fn) { _broadcaster = typeof fn === 'function' ? fn : null; }
+
+/**
  * Log genérico
  */
 function log(level, sessionId, message, color = colors.reset) {
@@ -67,6 +75,10 @@ function log(level, sessionId, message, color = colors.reset) {
 
     console.log(`${colors.gray}${timestamp}${colors.reset} ${color}${prefix}${colors.reset} ${message}`);
     saveToFile(level, sessionId, message);
+
+    if (_broadcaster) {
+        try { _broadcaster(level, sessionId, message, new Date().toISOString()); } catch (_) {}
+    }
 }
 
 /**
@@ -107,3 +119,4 @@ const logger = {
 };
 
 module.exports = logger;
+module.exports.setBroadcaster = setBroadcaster;

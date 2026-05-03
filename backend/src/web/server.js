@@ -121,6 +121,20 @@ class WebServer {
     }
 
     setupSocketIO() {
+        // Broadcaster de logs por conta -> emite `account:log` na room do tenant
+        logger.setBroadcaster((level, sessionId, message, ts) => {
+            if (!sessionId) return; // ignora logs do sistema
+            const found = sessionManager.findSessionByName(sessionId);
+            if (!found) return;
+            this.io.to(`tenant:${found.tenantId}`).emit('account:log', {
+                accountId: found.session.accountId,
+                accountName: sessionId,
+                level,
+                message,
+                timestamp: ts
+            });
+        });
+
         // Auth no handshake
         this.io.use(async (socket, next) => {
             try {

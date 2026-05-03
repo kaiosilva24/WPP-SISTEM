@@ -97,6 +97,21 @@ class SessionManager extends EventEmitter {
         return null;
     }
 
+    /**
+     * Lookup por accountName (logger usa accountName como sessionId).
+     */
+    findSessionByName(accountName) {
+        if (!accountName) return null;
+        for (const [tenantId, bucket] of this.tenantSessions) {
+            for (const session of bucket.values()) {
+                if (session.accountName === accountName) {
+                    return { tenantId, session };
+                }
+            }
+        }
+        return null;
+    }
+
     getTenantSessions(tenantId) {
         const bucket = this.tenantSessions.get(tenantId);
         return bucket ? Array.from(bucket.values()) : [];
