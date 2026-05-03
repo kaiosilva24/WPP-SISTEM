@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const db = require('../database/DatabaseManager');
 const sessionManager = require('../services/SessionManager');
 const messageTemplates = require('../utils/messageTemplates');
@@ -10,6 +13,97 @@ router.use(requireAuth, requireCustomer, requireActiveSubscription);
 
 function tdb(req) { return db.tenant(req.user.tenantId); }
 function tid(req) { return req.user.tenantId; }
+
+// =========================== MEDIA LIBRARY ===========================
+const MEDIA_CATEGORIES = ['images', 'videos', 'stickers', 'audio', 'docs', 'vcards'];
+const MEDIA_ROOT = path.join(__dirname, '..', '..', '..', 'media');
+
+function tenantMediaDir(req, category) {
+    const tenant = `tenant-${req.user.tenantId}`;
+    return path.join(MEDIA_ROOT, tenant, category);
+}
+
+function ensureDir(dir) {
+    try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+}
+
+function listMediaCategory(req, category) {
+    const dir = tenantMediaDir(req, category);
+    ensureDir(dir);
+    try {
+        return fs.readdirSync(dir)
+            .filter((f) => !f.startsWith('.'))
+            .map((f) => {
+                const full = path.join(dir, f);
+                let size = 0;
+                try { size = fs.statSync(full).size; } catch (_) {}
+                return { name: f, size, url: `/media/tenant-${req.user.tenantId}/${category}/${encodeURIComponent(f)}` };
+            });
+    } catch (_) { return []; }
+}
+
+const mediaUpload = multer({
+    storage: multer.diskStorage({
+        destination: (req, _file, cb) => {
+            const cat = req.params.category;
+            if (!MEDIA_CATEGORIES.includes(cat)) return cb(new Error('categoria inválida'));
+            const dir = tenantMediaDir(req, cat);
+            ensureDir(dir);
+            cb(null, dir);
+        },
+        filename: (_req, file, cb) => {
+            const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+            cb(null, `${Date.now()}_${safe}`);
+        }
+    }),
+    limits: { fileSize: 50 * 1024 * 1024 }
+});
+
+router.get('/media/library', (req, res) => {
+    try {
+        const out = {};
+        for (const cat of MEDIA_CATEGORIES) out[cat] = listMediaCategory(req, cat);
+        res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/media/upload/:category', mediaUpload.array('files', 20), (req, res) => {
+    try {
+        if (!MEDIA_CATEGORIES.includes(req.params.category)) {
+            return res.status(400).json({ error: 'categoria inválida' });
+        }
+        res.json({ count: (req.files || []).length });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/media/clear/:category', (req, res) => {
+    try {
+        if (!MEDIA_CATEGORIES.includes(req.params.category)) {
+            return res.status(400).json({ error: 'categoria inválida' });
+        }
+        const dir = tenantMediaDir(req, req.params.category);
+        let deleted = 0;
+        try {
+            for (const f of fs.readdirSync(dir)) {
+                try { fs.unlinkSync(path.join(dir, f)); deleted++; } catch (_) {}
+            }
+        } catch (_) {}
+        res.json({ deleted });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/media/:category/:filename', (req, res) => {
+    try {
+        if (!MEDIA_CATEGORIES.includes(req.params.category)) {
+            return res.status(400).json({ error: 'categoria inválida' });
+        }
+        const filename = path.basename(req.params.filename);
+        const target = path.join(tenantMediaDir(req, req.params.category), filename);
+        if (!fs.existsSync(target)) return res.status(404).json({ error: 'arquivo não encontrado' });
+        fs.unlinkSync(target);
+        res.status(204).send();
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 /**
  * GET /api/accounts

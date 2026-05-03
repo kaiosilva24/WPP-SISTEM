@@ -82,6 +82,7 @@ async function main() {
         await db.initGlobalTables();
 
         await migrateLegacyIfNeeded();
+        await db.syncAllTenantSchemas();
         await seedAdminFromEnv();
 
         logger.info(null, 'Iniciando servidor backend API...');

@@ -10,6 +10,7 @@ const accountsRouter = require('../api/accounts');
 const dispatchRouter = require('../api/dispatch');
 const authRouter = require('../api/auth');
 const adminRouter = require('../api/admin');
+const webhooksRouter = require('../api/webhooks');
 const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const dispatchEngine = require('../services/DispatchEngine');
@@ -47,7 +48,10 @@ class WebServer {
         this.app.use(express.json());
         const frontendPath = path.join(__dirname, '..', '..', '..', 'frontend', 'dist');
         this.app.use(express.static(frontendPath));
+        const mediaPath = path.join(__dirname, '..', '..', '..', 'media');
+        this.app.use('/media', express.static(mediaPath));
         logger.info(null, `📂 Servindo arquivos estáticos de: ${frontendPath}`);
+        logger.info(null, `🖼️  Servindo mídia de: ${mediaPath}`);
     }
 
     setupRoutes() {
@@ -55,6 +59,17 @@ class WebServer {
 
         // públicas
         this.app.use('/api/auth', authRouter);
+
+        // GET /api/stats — estatísticas globais do tenant logado
+        this.app.get('/api/stats', requireAuth, async (req, res) => {
+            try {
+                if (!req.user.tenantId) return res.json({});
+                const stats = await sessionManager.getGlobalStats(req.user.tenantId);
+                res.json(stats);
+            } catch (e) {
+                res.status(500).json({ error: e.message });
+            }
+        });
 
         // POST /api/test-proxy — valida proxy via ip-api.com (qualquer usuário autenticado)
         this.app.post('/api/test-proxy', requireAuth, async (req, res) => {
@@ -90,13 +105,18 @@ class WebServer {
         this.app.use('/api/admin', adminRouter);
         this.app.use('/api/accounts', accountsRouter);
         this.app.use('/api/dispatch', dispatchRouter);
+        this.app.use('/api/webhooks', webhooksRouter);
 
-        // SPA fallback
+        // 404 explícito para /api/* não tratado (evita hang -> 524 timeout do CDN)
+        this.app.all('/api/*', (req, res) => {
+            res.status(404).json({ error: `Rota não encontrada: ${req.method} ${req.path}` });
+        });
+
+        // SPA fallback (apenas GET de paths não-API)
         this.app.get('*', (req, res) => {
-            if (!req.path.startsWith('/api') && !req.path.startsWith('/socket.io')) {
-                const frontendPath = path.join(__dirname, '..', '..', '..', 'frontend', 'dist', 'index.html');
-                res.sendFile(frontendPath);
-            }
+            if (req.path.startsWith('/socket.io')) return res.status(404).end();
+            const frontendPath = path.join(__dirname, '..', '..', '..', 'frontend', 'dist', 'index.html');
+            res.sendFile(frontendPath);
         });
     }
 

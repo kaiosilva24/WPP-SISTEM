@@ -87,6 +87,26 @@ class DatabaseManager {
     }
 
     /**
+     * Re-aplica o DDL do tenant em todos os schemas existentes (idempotente,
+     * usa CREATE TABLE IF NOT EXISTS). Garante que tenants antigos recebam
+     * tabelas novas adicionadas em Tenancy.TENANT_DDL.
+     */
+    async syncAllTenantSchemas() {
+        try {
+            const r = await this.pool.query("SELECT schema_name FROM tenants WHERE status != 'deleted'");
+            for (const row of r.rows) {
+                try {
+                    await Tenancy.provisionTenantSchema(this.pool, row.schema_name);
+                } catch (e) {
+                    console.error(`⚠️  Falha ao sincronizar schema ${row.schema_name}: ${e.message}`);
+                }
+            }
+        } catch (e) {
+            console.error(`⚠️  syncAllTenantSchemas falhou: ${e.message}`);
+        }
+    }
+
+    /**
      * Atalho ao tenant DB.
      */
     tenant(tenantOrSchema) {

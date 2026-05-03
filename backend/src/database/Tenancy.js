@@ -129,6 +129,16 @@ const TENANT_DDL = (schema) => {
         )`,
 
         `CREATE INDEX IF NOT EXISTS dispatch_messages_idx ON ${s}.dispatch_messages(campaign_id, account_id, created_at)`,
+
+        `CREATE TABLE IF NOT EXISTS ${s}.webhooks (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            method TEXT DEFAULT 'GET',
+            headers JSONB,
+            body JSONB,
+            created_at TIMESTAMPTZ DEFAULT now()
+        )`,
     ];
 };
 
