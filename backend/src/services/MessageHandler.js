@@ -1,4 +1,3 @@
-const { MessageMedia } = require('whatsapp-web.js');
 const fs = require('fs');
 const path = require('path');
 const db = require('../database/DatabaseManager');
@@ -317,8 +316,7 @@ class MessageHandler {
             const randomFile = files[Math.floor(Math.random() * files.length)];
             const mediaPath = path.join(mediaFolder, randomFile);
 
-            const media = MessageMedia.fromFilePath(mediaPath);
-            await session.sendMedia(contactId, media);
+            await session.sendMedia(contactId, mediaPath);
 
             logger.messageSent(session.accountName, contactId, `Mídia (${randomFile})`);
 
@@ -331,35 +329,10 @@ class MessageHandler {
      * Processa mensagens não lidas ao iniciar
      */
     async processUnreadMessages(session) {
-        try {
-            if (session.status !== 'ready') return;
-
-            logger.info(session.accountName, 'Processando mensagens não lidas...');
-
-            const chats = await session.client.getChats();
-            let processedCount = 0;
-
-            for (const chat of chats) {
-                if (chat.unreadCount > 0) {
-                    const messages = await chat.fetchMessages({ limit: chat.unreadCount });
-
-                    for (const msg of messages) {
-                        if (this.shouldProcessMessage(session, msg.from, msg.body)) {
-                            await this.handleMessage(session, msg);
-                            processedCount++;
-
-                            // Delay entre mensagens
-                            await delay(5000);
-                        }
-                    }
-                }
-            }
-
-            logger.success(session.accountName, `${processedCount} mensagens não lidas processadas`);
-
-        } catch (error) {
-            logger.error(session.accountName, `Erro ao processar mensagens não lidas: ${error.message}`);
-        }
+        // Baileys não fornece histórico de chats sem um store persistente.
+        // Mensagens novas são tratadas pelo handler de `messages.upsert` em tempo real.
+        if (session.status !== 'ready') return;
+        logger.info(session.accountName, 'Pronto para receber novas mensagens (Baileys)');
     }
 
     /**

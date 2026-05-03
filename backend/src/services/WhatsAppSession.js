@@ -1,26 +1,75 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
 const path = require('path');
-const { HttpsProxyAgent } = require('https-proxy-agent');
-const proxyChain = require('proxy-chain');
-const qrcode = require('qrcode-terminal');
+const fs = require('fs');
 const EventEmitter = require('events');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+const axios = require('axios');
+const pino = require('pino');
+const {
+    default: makeWASocket,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    Browsers
+} = require('@whiskeysockets/baileys');
+
 const logger = require('../utils/logger');
+const db = require('../database/DatabaseManager');
+const { usePostgresAuthState } = require('./baileysAuthState');
+
+const baileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL || 'silent' });
+
+function normalizeJid(jid) {
+    if (!jid) return jid;
+    if (jid.endsWith('@c.us')) return jid.replace('@c.us', '@s.whatsapp.net');
+    return jid;
+}
+
+function extractText(msg) {
+    if (!msg || !msg.message) return '';
+    const m = msg.message;
+    if (m.conversation) return m.conversation;
+    if (m.extendedTextMessage && m.extendedTextMessage.text) return m.extendedTextMessage.text;
+    if (m.imageMessage && m.imageMessage.caption) return m.imageMessage.caption;
+    if (m.videoMessage && m.videoMessage.caption) return m.videoMessage.caption;
+    if (m.documentMessage && m.documentMessage.caption) return m.documentMessage.caption;
+    if (m.buttonsResponseMessage && m.buttonsResponseMessage.selectedDisplayText) return m.buttonsResponseMessage.selectedDisplayText;
+    return '';
+}
+
+function mediaTypeFromExt(filename) {
+    const ext = path.extname(filename).toLowerCase();
+    if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext)) {
+        return ext === '.webp' ? 'sticker' : 'image';
+    }
+    if (['.mp4', '.mov', '.3gp'].includes(ext)) return 'video';
+    if (['.mp3', '.ogg', '.m4a', '.wav'].includes(ext)) return 'audio';
+    if (ext === '.vcf') return 'vcard';
+    return 'document';
+}
 
 /**
- * Gerenciador de uma sessão WhatsApp individual (versão dinâmica)
+ * Sessão WhatsApp via Baileys (sem Chrome/Puppeteer).
+ * Mantém a mesma superfície pública usada por SessionManager,
+ * MessageHandler, DispatchEngine e DispatchAutoReply.
  */
 class WhatsAppSession extends EventEmitter {
     constructor(accountId, accountName, config, tenantId = null) {
         super();
-
         this.accountId = accountId;
         this.accountName = accountName;
         this.tenantId = tenantId;
-        this.client = null;
+        this.sock = null;
         this.status = 'disconnected';
         this.qrCode = null;
+        this.qrTimestamp = null;
+        this.publicIP = null;
+        this.isp = null;
+        this.country = null;
+        this.city = null;
+        this._authState = null;
+        this._reconnectTimer = null;
+        this._intentionalClose = false;
+        this._self = { id: null, user: null, name: null };
 
-        // Configurações da conta
         this.config = {
             proxy_enabled: config.proxy_enabled || false,
             proxy_ip: config.proxy_ip,
@@ -47,381 +96,313 @@ class WhatsAppSession extends EventEmitter {
             lastActivity: null
         };
 
-        this.runtimeOptions = {}; // Opções de tempo de execução (não salvas no banco)
+        this.runtimeOptions = {};
+
+        // Compat com código legado que lia `session.client.info.wid.user`.
+        this.client = {
+            info: { wid: { user: null } },
+            sendMessage: (jid, content, opts) => this._sendCompat(jid, content, opts),
+            getChats: async () => []
+        };
     }
 
-    /**
-     * Define opções de tempo de execução (ex: visible)
-     */
     setRuntimeOptions(options) {
         this.runtimeOptions = { ...this.runtimeOptions, ...options };
     }
 
-    /**
-     * Atualiza configuração
-     */
     updateConfig(newConfig) {
         Object.assign(this.config, newConfig);
         logger.info(this.accountName, 'Configuração atualizada');
     }
 
-    /**
-     * Obtém URL do proxy
-     */
     getProxyUrl() {
         if (!this.config.proxy_enabled) return null;
-
         const { proxy_ip, proxy_port, proxy_username, proxy_password } = this.config;
-
         if (!proxy_ip || !proxy_port) return null;
-
         if (proxy_username && proxy_password) {
             return `http://${proxy_username}:${proxy_password}@${proxy_ip}:${proxy_port}`;
         }
-
         return `http://${proxy_ip}:${proxy_port}`;
     }
 
-    /**
-     * Inicializa a sessão
-     */
     async initialize() {
         try {
             this.status = 'initializing';
+            this._intentionalClose = false;
 
-            // 1. Validação do Proxy (Obrigatória se habilitado)
             if (this.config.proxy_enabled) {
                 logger.info(this.accountName, `Validando proxy ${this.config.proxy_ip}:${this.config.proxy_port}...`);
-
-                const proxyValid = await this.validateProxyConnection();
-                if (!proxyValid) {
+                const ok = await this.validateProxyConnection();
+                if (!ok) {
                     this.status = 'error';
                     throw new Error('Falha ao conectar no Proxy. Verifique IP, Porta e Credenciais.');
                 }
-
                 logger.info(this.accountName, `✅ Proxy validado! IP: ${this.publicIP}`);
             } else {
                 await this.detectPublicIP();
-                logger.info(this.accountName, `Usando conexão direta (Local). IP: ${this.publicIP}`);
+                logger.info(this.accountName, `Usando conexão direta. IP: ${this.publicIP}`);
             }
 
-            // 2. Configuração do Proxy usando proxy-chain (cria proxy local anônimo)
-            let agent;
-            let anonymizedProxyUrl = null;
+            const proxyUrl = this.getProxyUrl();
+            const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
 
-            if (this.config.proxy_enabled) {
-                // URL do proxy com autenticação
-                const proxyUrl = this.config.proxy_username && this.config.proxy_password
-                    ? `http://${this.config.proxy_username}:${this.config.proxy_password}@${this.config.proxy_ip}:${this.config.proxy_port}`
-                    : `http://${this.config.proxy_ip}:${this.config.proxy_port}`;
+            const tdb = db.tenant(this.tenantId);
+            this._authState = await usePostgresAuthState(tdb, this.accountId);
 
-                // Cria proxy local anônimo que encaminha para o proxy real
-                // Isso elimina a necessidade de autenticação no navegador!
-                logger.info(this.accountName, 'Criando proxy local anônimo...');
-                anonymizedProxyUrl = await proxyChain.anonymizeProxy(proxyUrl);
-                this.anonymizedProxyUrl = anonymizedProxyUrl; // Salva para cleanup
-                logger.info(this.accountName, `✅ Proxy local criado: ${anonymizedProxyUrl}`);
+            const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1015901307] }));
 
-                agent = new HttpsProxyAgent(proxyUrl);
-            }
+            this.sock = makeWASocket({
+                version,
+                auth: this._authState.state,
+                logger: baileysLogger,
+                printQRInTerminal: false,
+                browser: Browsers.macOS('Desktop'),
+                syncFullHistory: false,
+                generateHighQualityLinkPreview: false,
+                markOnlineOnConnect: false,
+                agent,
+                fetchAgent: agent
+            });
 
-            // 3. Configuração do Cliente
-            const startVisible = this.runtimeOptions && this.runtimeOptions.visible;
+            this.sock.ev.on('creds.update', this._authState.saveCreds);
+            this.sock.ev.on('connection.update', (u) => this._onConnectionUpdate(u));
+            this.sock.ev.on('messages.upsert', (u) => this._onMessagesUpsert(u));
 
-            // Isolamento por tenant: cada cliente WhatsApp em pasta separada
-            const tenantSegment = this.tenantId ? `tenant-${this.tenantId}` : 'tenant-default';
-            const dataPath = path.join(
-                process.env.HOME || process.env.USERPROFILE || '/tmp',
-                '.wwebjs_auth_aquecimento',
-                tenantSegment
-            );
-
-            // Em Linux (Discloud/VPS), usa o Chromium do sistema (instalado via APT)
-            // pois o Chrome bundled do Puppeteer falta libs do sistema (libglib-2.0.so.0 etc.).
-            const fs = require('fs');
-            let systemChromiumPath = process.env.PUPPETEER_EXECUTABLE_PATH || null;
-            if (!systemChromiumPath && process.platform === 'linux') {
-                const candidates = [
-                    '/usr/bin/chromium',
-                    '/usr/bin/chromium-browser',
-                    '/usr/bin/google-chrome',
-                    '/usr/bin/google-chrome-stable'
-                ];
-                systemChromiumPath = candidates.find((p) => {
-                    try { return fs.existsSync(p); } catch (_) { return false; }
-                }) || null;
-            }
-            if (systemChromiumPath) {
-                logger.info(this.accountName, `Usando Chromium do sistema: ${systemChromiumPath}`);
-            } else if (process.platform === 'linux') {
-                logger.warn(this.accountName, 'Chromium do sistema não encontrado em /usr/bin — usando bundled do Puppeteer (pode falhar por falta de libs)');
-            }
-
-            const clientConfig = {
-                authStrategy: new LocalAuth({
-                    clientId: `account-${this.accountId}`,
-                    dataPath: dataPath
-                }),
-                requestTimeout: 60000,
-                puppeteer: {
-                    // Em produção (Linux), força headless e usa Chromium do sistema quando disponível
-                    headless: process.platform === 'linux' ? true : !startVisible,
-                    ...(systemChromiumPath ? { executablePath: systemChromiumPath } : {}),
-                    // Adiciona single-process para ambientes com recursos limitados
-                    bypassCSP: true,
-                    args: [
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-extensions',
-                        '--disable-dev-shm-usage',
-                        '--disable-accelerated-2d-canvas',
-                        '--no-first-run',
-                        '--no-zygote',
-                        '--disable-gpu',
-                        '--disable-features=IsolateOrigins,site-per-process',
-
-                        // === CORREÇÃO DO VAZAMENTO WEBRTC (CRÍTICO!) ===
-                        '--disable-webrtc',
-                        '--disable-webrtc-hw-decoding',
-                        '--disable-webrtc-hw-encoding',
-                        '--disable-webrtc-multiple-routes-enabled',
-                        '--enforce-webrtc-ip-permission-check',
-                        '--force-webrtc-ip-handling-policy=default_public_interface_only',
-                        '--disable-rtc-smoothness-algorithm',
-                        '--disable-gl-drawing-for-tests',
-
-                        // === ANTI-FINGERPRINTING ADICIONAL ===
-                        '--disable-blink-features=AutomationControlled',
-                        '--disable-infobars',
-
-                        // USA O PROXY LOCAL ANÔNIMO (sem autenticação!)
-                        ...(anonymizedProxyUrl ? [`--proxy-server=${anonymizedProxyUrl.replace('http://', '')}`] : [])
-                    ]
-                },
-                // User-Agent consistente (Windows Chrome - mais comum e menos suspeito)
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                agent: agent
-            };
-
-            this.client = new Client(clientConfig);
-
-            // Eventos do cliente
-            this.setupClientEvents();
-
-            logger.info(this.accountName, 'Iniciando cliente WhatsApp...');
-
-            // Inicia a injeção do bloqueio WebRTC em paralelo (não bloqueia)
-            this.injectWebRTCBlocker();
-
-            await this.client.initialize();
-
+            logger.info(this.accountName, 'Cliente Baileys inicializado, aguardando conexão...');
         } catch (error) {
             logger.error(this.accountName, `Erro fatal na inicialização: ${error.message}`);
-            require('fs').writeFileSync(path.join(__dirname, '..', '..', 'error_launch.log'), `Error: ${error.message}\nStack: ${error.stack}\n`);
             this.status = 'error';
             this.emit('error', error);
             throw error;
         }
     }
 
-    /**
-     * Configura autenticação ANTES da navegação começar (BLOCKING)
-     */
-    async setupProxyAuthBeforeNavigation() {
-        return new Promise((resolve, reject) => {
-            logger.info(this.accountName, 'Aguardando navegador para configurar autenticação...');
-            let attempts = 0;
-            const maxAttempts = 600; // 60 segundos
+    async _onConnectionUpdate(update) {
+        const { connection, lastDisconnect, qr } = update;
 
-            const checkInterval = setInterval(async () => {
-                attempts++;
+        if (qr) {
+            this.status = 'qr';
+            this.qrCode = qr;
+            this.qrTimestamp = Date.now();
+            logger.info(this.accountName, 'QR Code gerado');
+            this.emit('qr', qr);
+        }
 
-                if (this.client && this.client.pupBrowser) {
-                    clearInterval(checkInterval);
-                    try {
-                        const browser = this.client.pupBrowser;
-                        logger.info(this.accountName, 'Navegador detectado! Configurando autenticação PRÉ-NAVEGAÇÃO...');
+        if (connection === 'connecting') {
+            this.status = 'connecting';
+        }
 
-                        // Função de autenticação
-                        const auth = async (page) => {
-                            try {
-                                await page.authenticate({
-                                    username: this.config.proxy_username,
-                                    password: this.config.proxy_password
-                                });
-                            } catch (e) {
-                                logger.warn(this.accountName, `Erro ao autenticar página: ${e.message}`);
-                            }
-                        };
+        if (connection === 'open') {
+            this.status = 'ready';
+            this.qrCode = null;
+            this.qrTimestamp = null;
+            this.stats.startTime = Date.now();
+            this.stats.lastActivity = Date.now();
 
-                        // 1. Autentica páginas existentes
-                        const pages = await browser.pages();
-                        logger.info(this.accountName, `Autenticando ${pages.length} página(s) existente(s)...`);
-                        for (const page of pages) {
-                            await auth(page);
-                        }
+            const me = this.sock.user || {};
+            const userPart = (me.id || '').split(':')[0].split('@')[0];
+            this._self = { id: me.id, user: userPart, name: me.name || me.verifiedName || me.notify || null };
+            this.client.info.wid.user = userPart;
+            this.client.info.pushname = this._self.name;
 
-                        // 2. Monitora novas páginas
-                        browser.on('targetcreated', async (target) => {
-                            try {
-                                const page = await target.page();
-                                if (page) {
-                                    logger.info(this.accountName, 'Nova página detectada, autenticando...');
-                                    await auth(page);
-                                }
-                            } catch (e) { }
-                        });
+            logger.info(this.accountName, `Conectado como: ${this._self.name || 'sem nome'} (${userPart})`);
 
-                        logger.info(this.accountName, '✅ Autenticação configurada! Prosseguindo com inicialização...');
-                        resolve();
+            // emite no formato esperado pelo SessionManager (info.wid.user)
+            this.emit('authenticated');
+            this.emit('ready', { wid: { user: userPart }, pushname: this._self.name });
+        }
 
-                    } catch (error) {
-                        logger.error(this.accountName, `Erro ao configurar autenticação: ${error.message}`);
-                        reject(error);
-                    }
-                } else if (attempts >= maxAttempts) {
-                    clearInterval(checkInterval);
-                    const err = new Error('Timeout aguardando navegador');
-                    logger.error(this.accountName, err.message);
-                    reject(err);
-                } else if (!this.client) {
-                    clearInterval(checkInterval);
-                    reject(new Error('Cliente destruído durante setup'));
-                }
-            }, 100);
-        });
+        if (connection === 'close') {
+            const reason = lastDisconnect && lastDisconnect.error
+                ? (lastDisconnect.error.output && lastDisconnect.error.output.statusCode) || lastDisconnect.error.message
+                : 'unknown';
+            const loggedOut = reason === DisconnectReason.loggedOut;
+
+            this.status = loggedOut ? 'logged_out' : 'disconnected';
+            logger.warn(this.accountName, `Conexão fechada (reason=${reason})`);
+            this.emit('disconnected', String(reason));
+
+            if (loggedOut) {
+                logger.warn(this.accountName, 'Sessão deslogada — limpando credenciais persistidas');
+                try { if (this._authState) await this._authState.clearAll(); } catch (_) {}
+                return;
+            }
+
+            if (!this._intentionalClose) {
+                if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+                this._reconnectTimer = setTimeout(() => this.reconnect(), 5000);
+            }
+        }
+    }
+
+    async _onMessagesUpsert({ messages, type }) {
+        if (type !== 'notify') return;
+        for (const m of messages) {
+            if (!m || !m.message) continue;
+            if (m.key && m.key.fromMe) continue;
+            const from = m.key.remoteJid;
+            const body = extractText(m);
+            const adapted = {
+                from,
+                body,
+                timestamp: typeof m.messageTimestamp === 'number' ? m.messageTimestamp : Number(m.messageTimestamp || 0),
+                hasMedia: !!(m.message.imageMessage || m.message.videoMessage || m.message.audioMessage || m.message.documentMessage || m.message.stickerMessage),
+                _raw: m
+            };
+            this.stats.messagesReceived++;
+            this.stats.lastActivity = Date.now();
+            this.stats.uniqueContacts.add(from);
+            this.emit('message', adapted);
+        }
+    }
+
+    async reconnect() {
+        try {
+            logger.info(this.accountName, 'Reconectando...');
+            if (this.sock) {
+                try { this.sock.ev.removeAllListeners(); } catch (_) {}
+                try { this.sock.end(undefined); } catch (_) {}
+                this.sock = null;
+            }
+            await this.initialize();
+        } catch (error) {
+            logger.error(this.accountName, `Erro ao reconectar: ${error.message}`);
+            if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = setTimeout(() => this.reconnect(), 30000);
+        }
+    }
+
+    _ensureReady() {
+        if (this.status !== 'ready' || !this.sock) throw new Error('Cliente não está pronto');
+    }
+
+    async _sendCompat(jid, content, opts = {}) {
+        // compat para chamadas legadas no formato whatsapp-web.js:
+        // session.client.sendMessage(to, media, { caption })
+        if (typeof content === 'string') return this.sendMessage(jid, content);
+        if (content && typeof content === 'object') {
+            // objeto Baileys já formatado
+            if (content.image || content.video || content.audio || content.document || content.sticker || content.text) {
+                this._ensureReady();
+                return this.sock.sendMessage(normalizeJid(jid), content);
+            }
+            // objeto MessageMedia legado (mediaPath em filePath)
+            if (content.filePath || content.path) {
+                return this.sendMedia(jid, content.filePath || content.path, opts.caption);
+            }
+        }
+        throw new Error('Formato de mensagem não suportado em sendMessage compat');
+    }
+
+    async sendMessage(to, content) {
+        this._ensureReady();
+        const jid = normalizeJid(to);
+        if (typeof content === 'string') {
+            await this.sock.sendMessage(jid, { text: content });
+        } else {
+            await this.sock.sendMessage(jid, content);
+        }
+        this.stats.messagesSent++;
+        this.stats.lastActivity = Date.now();
+        this.emit('message:sent');
+    }
+
+    async sendMedia(to, mediaOrPath, caption) {
+        this._ensureReady();
+        const jid = normalizeJid(to);
+        const filePath = typeof mediaOrPath === 'string'
+            ? mediaOrPath
+            : (mediaOrPath && (mediaOrPath.filePath || mediaOrPath.path));
+        if (!filePath || !fs.existsSync(filePath)) {
+            throw new Error(`Arquivo de mídia não encontrado: ${filePath}`);
+        }
+        const buf = fs.readFileSync(filePath);
+        const filename = path.basename(filePath);
+        const kind = mediaTypeFromExt(filename);
+
+        let payload;
+        switch (kind) {
+            case 'image':   payload = { image: buf, caption: caption || undefined }; break;
+            case 'video':   payload = { video: buf, caption: caption || undefined }; break;
+            case 'audio':   payload = { audio: buf, mimetype: 'audio/mp4', ptt: false }; break;
+            case 'sticker': payload = { sticker: buf }; break;
+            case 'vcard':   payload = { document: buf, mimetype: 'text/vcard', fileName: filename }; break;
+            default:        payload = { document: buf, mimetype: 'application/octet-stream', fileName: filename, caption: caption || undefined };
+        }
+
+        await this.sock.sendMessage(jid, payload);
+        this.stats.messagesSent++;
+        this.stats.lastActivity = Date.now();
+        this.emit('message:sent');
     }
 
     /**
-     * Injeta script para bloquear COMPLETAMENTE o WebRTC (previne vazamento de IP)
-     * Isso é executado em paralelo com initialize() e injeta assim que o browser estiver disponível
+     * Compat: retorna um proxy de "chat" com sendSeen / sendStateTyping.
      */
-    async injectWebRTCBlocker() {
-        const checkInterval = setInterval(async () => {
-            // Verifica se o browser já está disponível
-            if (this.client && this.client.pupBrowser) {
-                clearInterval(checkInterval);
-
+    async getChat(chatId) {
+        const jid = normalizeJid(chatId);
+        const sock = this.sock;
+        const accountName = this.accountName;
+        return {
+            id: { _serialized: jid },
+            sendSeen: async () => {
                 try {
-                    const browser = this.client.pupBrowser;
-                    const pages = await browser.pages();
-
-                    // Script para desabilitar completamente WebRTC
-                    const webrtcBlockScript = `
-                        // Bloqueia RTCPeerConnection completamente
-                        Object.defineProperty(window, 'RTCPeerConnection', {
-                            value: undefined,
-                            writable: false,
-                            configurable: false
-                        });
-                        Object.defineProperty(window, 'webkitRTCPeerConnection', {
-                            value: undefined,
-                            writable: false,
-                            configurable: false
-                        });
-                        Object.defineProperty(window, 'mozRTCPeerConnection', {
-                            value: undefined,
-                            writable: false,
-                            configurable: false
-                        });
-                        
-                        // Bloqueia RTCDataChannel
-                        Object.defineProperty(window, 'RTCDataChannel', {
-                            value: undefined,
-                            writable: false,
-                            configurable: false
-                        });
-                        
-                        // Bloqueia RTCSessionDescription
-                        Object.defineProperty(window, 'RTCSessionDescription', {
-                            value: undefined,
-                            writable: false,
-                            configurable: false
-                        });
-                        
-                        // Bloqueia RTCIceCandidate
-                        Object.defineProperty(window, 'RTCIceCandidate', {
-                            value: undefined,
-                            writable: false,
-                            configurable: false
-                        });
-                        
-                        // Bloqueia navigator.mediaDevices (opcional, pode afetar funcionalidades)
-                        if (navigator.mediaDevices) {
-                            navigator.mediaDevices.getUserMedia = () => Promise.reject(new Error('WebRTC disabled'));
-                            navigator.mediaDevices.getDisplayMedia = () => Promise.reject(new Error('WebRTC disabled'));
-                        }
-                        
-                        console.log('[ANTI-DETECT] WebRTC APIs bloqueadas com sucesso');
-                    `;
-
-                    // Injeta em todas as páginas existentes
-                    for (const page of pages) {
-                        try {
-                            // Injeta script que será executado ANTES de qualquer outro script da página
-                            await page.evaluateOnNewDocument(webrtcBlockScript);
-                            // Também executa imediatamente se a página já carregou
-                            await page.evaluate(webrtcBlockScript);
-                        } catch (e) {
-                            // Ignora erros em páginas que já fecharam
-                        }
-                    }
-
-                    // Monitora novas páginas para injetar o script
-                    browser.on('targetcreated', async (target) => {
-                        try {
-                            const page = await target.page();
-                            if (page) {
-                                await page.evaluateOnNewDocument(webrtcBlockScript);
-                                await page.evaluate(webrtcBlockScript);
-                            }
-                        } catch (e) {
-                            // Ignora erros
-                        }
-                    });
-
-                    logger.info(this.accountName, '🛡️ WebRTC Blocker ativo - IP protegido!');
-
-                } catch (error) {
-                    logger.warn(this.accountName, `Erro ao injetar WebRTC blocker: ${error.message}`);
+                    // sem o key da última mensagem só dá pra mandar presença
+                    await sock.sendPresenceUpdate('available', jid);
+                } catch (e) {
+                    logger.warn(accountName, `sendSeen falhou: ${e.message}`);
                 }
-            } else if (!this.client) {
-                clearInterval(checkInterval);
-            }
-        }, 50); // Verifica a cada 50ms para ser rápido
+            },
+            sendStateTyping: async () => {
+                try { await sock.sendPresenceUpdate('composing', jid); } catch (_) {}
+            },
+            sendStateRecording: async () => {
+                try { await sock.sendPresenceUpdate('recording', jid); } catch (_) {}
+            },
+            clearState: async () => {
+                try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {}
+            },
+            // Stub: Baileys não tem fetch de unreads sem store. Devolve [].
+            fetchMessages: async () => []
+        };
+    }
+
+    /**
+     * Compat: retorna um "contato" superficial.
+     */
+    async getContact(contactId) {
+        const jid = normalizeJid(contactId);
+        const number = jid.split('@')[0];
+        let pushname = null;
+        try {
+            // Não há getContactById direto; usa store fictício/null
+            const onWhats = await this.sock.onWhatsApp(number).catch(() => null);
+            if (onWhats && onWhats[0]) pushname = onWhats[0].verifiedName || null;
+        } catch (_) {}
+        return {
+            id: { _serialized: jid, user: number },
+            number,
+            pushname,
+            name: null
+        };
     }
 
     async validateProxyConnection() {
         try {
-            const axios = require('axios');
-
-            logger.info(this.accountName, `Validando proxy ${this.config.proxy_ip}:${this.config.proxy_port}...`);
-
-            // Constrói URL do proxy
-            const proxyUrl = this.config.proxy_username && this.config.proxy_password
-                ? `http://${this.config.proxy_username}:${this.config.proxy_password}@${this.config.proxy_ip}:${this.config.proxy_port}`
-                : `http://${this.config.proxy_ip}:${this.config.proxy_port}`;
-
-            // Cria o agente
+            const proxyUrl = this.getProxyUrl();
+            if (!proxyUrl) return false;
             const agent = new HttpsProxyAgent(proxyUrl);
-
-            // Testa conexão usando o agente (semelhante ao puppeteer)
             const response = await axios.get('http://ip-api.com/json/', {
-                httpsAgent: agent, // Para URLs HTTPS (se usasse https://ip-api.com)
-                httpAgent: agent,  // Para URLs HTTP
-                timeout: 10000
+                httpAgent: agent, httpsAgent: agent, timeout: 10000
             });
-
             if (response.data && response.data.query) {
                 this.publicIP = response.data.query;
                 this.isp = response.data.isp || response.data.org || 'Desconhecido';
-                this.country = response.data.country || 'Desconhecido';
-                this.city = response.data.city || 'Desconhecido';
-
-                logger.info(this.accountName, `Proxy validado. IP Externo: ${this.publicIP} - ISP: ${this.isp}`);
+                this.country = response.data.country || null;
+                this.city = response.data.city || null;
+                logger.info(this.accountName, `Proxy validado. IP: ${this.publicIP} - ISP: ${this.isp}`);
                 return true;
             }
-
             return false;
         } catch (error) {
             logger.error(this.accountName, `Erro validação proxy: ${error.message}`);
@@ -429,211 +410,35 @@ class WhatsAppSession extends EventEmitter {
         }
     }
 
-    /**
-     * Detecta IP público e informações do ISP
-     */
     async detectPublicIP() {
         try {
-            const axios = require('axios');
-
-            // Só usa agent se estiver configurado (embora detectPublicIP geralmente seja usado sem proxy)
-            // Mantendo lógica original mas corrigindo instanciacao se necessário, 
-            // no entanto, se proxy_enabled é true, usamos validateProxyConnection.
-            // Aqui é fallback para conexão direta.
-
-            const response = await axios.get('http://ip-api.com/json/', {
-                timeout: 10000
-            });
-
+            const response = await axios.get('http://ip-api.com/json/', { timeout: 10000 });
             if (response.data && response.data.status === 'success') {
                 this.publicIP = response.data.query;
                 this.isp = response.data.isp || response.data.org || 'Desconhecido';
                 this.country = response.data.country;
                 this.city = response.data.city;
-
-                logger.info(this.accountName, `IP público: ${this.publicIP} (${this.isp})`);
             }
         } catch (error) {
             logger.warn(this.accountName, `Não foi possível detectar IP público: ${error.message}`);
-            this.publicIP = null;
-            this.isp = null;
         }
     }
 
-    /**
-     * Configura eventos do cliente WhatsApp
-     */
-    setupClientEvents() {
-        // QR Code
-        this.client.on('qr', (qr) => {
-            this.status = 'qr';
-            this.qrCode = qr;
-            this.qrTimestamp = Date.now(); // Registra quando o QR foi gerado
-
-            logger.qr(this.accountName);
-            qrcode.generate(qr, { small: true });
-
-            this.emit('qr', qr);
-        });
-
-        // Autenticado
-        this.client.on('authenticated', () => {
-            this.status = 'authenticated';
-            this.qrCode = null;
-            this.qrTimestamp = null; // Limpa o timestamp
-
-            logger.authenticated(this.accountName);
-            this.emit('authenticated');
-        });
-
-        // Pronto
-        this.client.on('ready', async () => {
-            this.status = 'ready';
-            this.qrCode = null;
-            this.qrTimestamp = null; // Limpa o timestamp
-            this.stats.startTime = Date.now();
-            this.stats.lastActivity = Date.now();
-
-            logger.ready(this.accountName);
-
-            // Obtém informações da conta
-            const info = this.client.info;
-            logger.info(this.accountName, `Conectado como: ${info.pushname} (${info.wid.user})`);
-
-            this.emit('ready', info);
-        });
-
-        // Desconectado
-        this.client.on('disconnected', (reason) => {
-            this.status = 'disconnected';
-
-            logger.disconnected(this.accountName);
-            logger.warn(this.accountName, `Razão: ${reason}`);
-
-            this.emit('disconnected', reason);
-
-            // Tenta reconectar após 5 segundos
-            setTimeout(() => this.reconnect(), 5000);
-        });
-
-        // Erro de autenticação
-        this.client.on('auth_failure', (msg) => {
-            this.status = 'auth_failure';
-
-            logger.error(this.accountName, `Falha na autenticação: ${msg}`);
-            this.emit('auth_failure', msg);
-        });
-
-        // Mensagem recebida
-        this.client.on('message', async (msg) => {
-            this.stats.messagesReceived++;
-            this.stats.lastActivity = Date.now();
-            this.stats.uniqueContacts.add(msg.from);
-
-            this.emit('message', msg);
-        });
-    }
-
-    /**
-     * Tenta reconectar
-     */
-    async reconnect() {
-        // Force restart even if ready, because user explicitly requested it via button
-        // if (this.status === 'ready') return; 
-
-        try {
-            logger.reconnecting(this.accountName);
-
-            // Destrói cliente anterior se existir para liberar recursos e locks
-            if (this.client) {
-                try {
-                    logger.info(this.accountName, 'Limpando instância anterior do cliente...');
-                    await this.client.destroy();
-                } catch (e) {
-                    logger.warn(this.accountName, `Erro ao limpar cliente anterior: ${e.message}`);
-                }
-                this.client = null;
-            }
-
-            await this.initialize();
-        } catch (error) {
-            logger.error(this.accountName, `Erro ao reconectar: ${error.message}`);
-
-            // Tenta novamente após 30 segundos
-            setTimeout(() => this.reconnect(), 30000);
-        }
-    }
-
-    /**
-     * Envia mensagem
-     */
-    async sendMessage(to, content) {
-        if (this.status !== 'ready') {
-            throw new Error('Cliente não está pronto');
-        }
-
-        await this.client.sendMessage(to, content);
-        this.stats.messagesSent++;
-        this.stats.lastActivity = Date.now();
-        this.emit('message:sent');
-    }
-
-    /**
-     * Envia mídia
-     */
-    async sendMedia(to, media) {
-        if (this.status !== 'ready') {
-            throw new Error('Cliente não está pronto');
-        }
-
-        await this.client.sendMessage(to, media);
-        this.stats.messagesSent++;
-        this.stats.lastActivity = Date.now();
-        this.emit('message:sent');
-    }
-
-    /**
-     * Obtém chat
-     */
-    async getChat(chatId) {
-        return await this.client.getChatById(chatId);
-    }
-
-    /**
-     * Obtém contato
-     */
-    async getContact(contactId) {
-        return await this.client.getContactById(contactId);
-    }
-
-    /**
-     * Retorna informações da sessão
-     */
     async getInfo() {
         const QRCode = require('qrcode');
-
-        // Converte QR code para base64 se existir
         let qrCodeImage = null;
         if (this.qrCode) {
-            try {
-                qrCodeImage = await QRCode.toDataURL(this.qrCode);
-            } catch (error) {
-                logger.error(this.accountName, `Erro ao converter QR para base64: ${error.message}`);
-            }
+            try { qrCodeImage = await QRCode.toDataURL(this.qrCode); } catch (_) {}
         }
-
         return {
             accountId: this.accountId,
             accountName: this.accountName,
             status: this.status,
             qrCode: qrCodeImage,
-            qrTimestamp: this.qrTimestamp, // Timestamp de quando o QR foi gerado
+            qrTimestamp: this.qrTimestamp,
             publicIP: this.publicIP,
             isp: this.isp,
-            proxy: this.config.proxy_enabled ? {
-                ip: this.config.proxy_ip,
-                port: this.config.proxy_port
-            } : null,
+            proxy: this.config.proxy_enabled ? { ip: this.config.proxy_ip, port: this.config.proxy_port } : null,
             config: this.config,
             stats: {
                 messagesSent: this.stats.messagesSent,
@@ -645,58 +450,21 @@ class WhatsAppSession extends EventEmitter {
         };
     }
 
-    /**
-     * Destrói a sessão
-     */
     async destroy() {
         try {
-            if (this.client) {
-                logger.info(this.accountName, 'Destruindo sessão...');
-
-                // Tenta deslogar primeiro
-                try {
-                    await this.client.logout();
-                } catch (e) {
-                    logger.warn(this.accountName, 'Erro ao fazer logout (ignorado)');
-                }
-
-                // Destrói o cliente (fecha o navegador)
-                try {
-                    await this.client.destroy();
-                } catch (e) {
-                    logger.warn(this.accountName, 'Erro ao destruir cliente (ignorado)');
-                }
-
-                // Tenta fechar o navegador via puppeteer
-                try {
-                    if (this.client.pupBrowser) {
-                        await this.client.pupBrowser.close();
-                    }
-                } catch (e) {
-                    logger.warn(this.accountName, 'Erro ao fechar navegador (ignorado)');
-                }
-
-                this.client = null;
+            this._intentionalClose = true;
+            if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+            if (this.sock) {
+                try { this.sock.ev.removeAllListeners(); } catch (_) {}
+                try { await this.sock.logout().catch(() => {}); } catch (_) {}
+                try { this.sock.end(undefined); } catch (_) {}
+                this.sock = null;
             }
-
-            // Cleanup do proxy-chain
-            if (this.anonymizedProxyUrl) {
-                try {
-                    await proxyChain.closeAnonymizedProxy(this.anonymizedProxyUrl, true);
-                    logger.info(this.accountName, 'Proxy local fechado');
-                } catch (e) {
-                    logger.warn(this.accountName, 'Erro ao fechar proxy local (ignorado)');
-                }
-                this.anonymizedProxyUrl = null;
-            }
-
             this.status = 'destroyed';
             this.qrCode = null;
-            logger.success(this.accountName, 'Sessão destruída com sucesso');
+            logger.success(this.accountName, 'Sessão destruída');
         } catch (error) {
             logger.error(this.accountName, `Erro ao destruir sessão: ${error.message}`);
-            // Força limpeza mesmo com erro
-            this.client = null;
             this.status = 'destroyed';
         }
     }

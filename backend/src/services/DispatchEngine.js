@@ -1,5 +1,4 @@
 const EventEmitter = require('events');
-const { MessageMedia } = require('whatsapp-web.js');
 const db = require('../database/DatabaseManager');
 const sessionManager = require('./SessionManager');
 const logger = require('../utils/logger');
@@ -220,13 +219,8 @@ class DispatchEngine extends EventEmitter {
                     await session.sendMessage(to, piece.body);
                     body = piece.body;
                 } else {
-                    const media = MessageMedia.fromFilePath(piece.mediaPath);
-                    if (piece.caption) {
-                        await session.client.sendMessage(to, media, { caption: piece.caption });
-                        body = piece.caption;
-                    } else {
-                        await session.sendMedia(to, media);
-                    }
+                    await session.sendMedia(to, piece.mediaPath, piece.caption || undefined);
+                    if (piece.caption) body = piece.caption;
                     mediaPath = piece.mediaPath;
                 }
 

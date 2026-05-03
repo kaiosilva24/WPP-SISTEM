@@ -139,6 +139,16 @@ const TENANT_DDL = (schema) => {
             body JSONB,
             created_at TIMESTAMPTZ DEFAULT now()
         )`,
+
+        `CREATE TABLE IF NOT EXISTS ${s}.whatsapp_auth (
+            account_id INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            key_id TEXT NOT NULL,
+            value JSONB NOT NULL,
+            updated_at TIMESTAMPTZ DEFAULT now(),
+            PRIMARY KEY (account_id, type, key_id),
+            FOREIGN KEY (account_id) REFERENCES ${s}.accounts(id) ON DELETE CASCADE
+        )`,
     ];
 };
 
