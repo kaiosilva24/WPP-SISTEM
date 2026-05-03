@@ -10,17 +10,23 @@ const { getFirstResponse, getFollowUpResponse, getGroupGreeting } = require('../
  */
 class MessageHandler {
     constructor() {
-        // Controle de rate limiting por contato
+        // Rate limit (último envio bem-sucedido) por contato
         this.lastMessageTime = new Map();
 
-        // Controle de processamento em andamento
-        this.processing = new Set();
-
-        // Contador de interações por contato
+        // Contador de interações por contato (usado pra escolher first vs followup template)
         this.interactions = new Map();
 
         // Blacklist de contatos
         this.blacklist = new Set();
+
+        // ===== Fila por chat com coalescência =====
+        // chatQueues: key = `${accountId}:${contactId}` → { batch: [Message...], processing: bool, lastTouched: ms }
+        this.chatQueues = new Map();
+
+        // Pausa global (após responder qualquer privado/grupo, segura próximas respostas do MESMO tipo)
+        // key = accountId → epoch_ms_until
+        this.globalPrivatePauseUntil = new Map();
+        this.globalGroupPauseUntil   = new Map();
 
         // Carrega blacklist do arquivo
         this.loadBlacklist();
@@ -75,11 +81,10 @@ class MessageHandler {
     }
 
     /**
-     * Verifica se deve processar a mensagem
+     * Filtros baratos antes de enfileirar.
+     * Concorrência (já processando) e rate-limit viraram GATES dentro do drain — não descartam mais.
      */
-    shouldProcessMessage(session, contactId, messageBody) {
-        const config = this.getAccountConfig(session);
-
+    _shouldEnqueue(session, contactId, messageBody) {
         // Ignora mensagens do próprio número
         const myUser = session.client && session.client.info && session.client.info.wid && session.client.info.wid.user;
         if (myUser && contactId.startsWith(myUser)) {
@@ -87,8 +92,7 @@ class MessageHandler {
             return false;
         }
 
-        // Mensagens sem texto (sticker/audio sem caption etc) — por enquanto ignora,
-        // pois templates respondem texto; pode-se evoluir pra responder mídias depois.
+        // Mensagens sem texto (sticker/audio sem caption etc) — não respondem por templates de texto.
         if (!messageBody || typeof messageBody !== 'string' || messageBody.trim().length === 0) {
             logger.messageIgnored(session.accountName, contactId, 'sem texto/body');
             return false;
@@ -101,25 +105,58 @@ class MessageHandler {
             return false;
         }
 
-        // Verifica se já está processando
-        const processingKey = `${session.accountId}_${contactId}`;
-        if (this.processing.has(processingKey)) {
-            logger.messageIgnored(session.accountName, contactId, 'já processando');
-            return false;
-        }
-
-        // Verifica rate limiting
-        const lastTime = this.lastMessageTime.get(contactId);
-        if (lastTime) {
-            const timeSince = Date.now() - lastTime;
-            if (timeSince < config.min_message_interval) {
-                const remaining = config.min_message_interval - timeSince;
-                logger.messageIgnored(session.accountName, contactId, `rate limit (aguardar ${formatDelay(remaining)})`);
-                return false;
-            }
-        }
-
         return true;
+    }
+
+    /**
+     * Espera dentro do drain caso a pausa global do tipo (privado/grupo) esteja ativa.
+     * Não descarta a msg — apenas retém até o tempo passar.
+     */
+    async _waitGlobalPause(session, contactId) {
+        const isGroup = contactId.endsWith('@g.us');
+        const map = isGroup ? this.globalGroupPauseUntil : this.globalPrivatePauseUntil;
+        const until = map.get(session.accountId) || 0;
+        const wait = until - Date.now();
+        if (wait > 0) {
+            logger.info(session.accountName,
+                `⏸️  Pausa global ${isGroup ? 'grupo' : 'privado'} ativa: aguardando ${formatDelay(wait)} antes de responder a ${contactId}`);
+            await delay(wait);
+        }
+    }
+
+    /**
+     * Aplica pausa global após resposta bem-sucedida.
+     */
+    _setGlobalPause(session, contactId) {
+        const cfg = this.getAccountConfig(session);
+        const isGroup = contactId.endsWith('@g.us');
+        const minutes = isGroup
+            ? (cfg.global_group_delay_minutes || 0)
+            : (cfg.global_private_delay_minutes || 0);
+        if (minutes > 0) {
+            const map = isGroup ? this.globalGroupPauseUntil : this.globalPrivatePauseUntil;
+            map.set(session.accountId, Date.now() + minutes * 60_000);
+            logger.info(session.accountName,
+                `⏱️  Pausa global ${isGroup ? 'grupo' : 'privado'} disparada por ${minutes} min`);
+        }
+    }
+
+    /**
+     * Espera o intervalo mínimo entre mensagens pro mesmo contato (rate-limit).
+     * Em vez de descartar, aguarda.
+     */
+    async _waitRateLimit(session, contactId) {
+        const cfg = this.getAccountConfig(session);
+        const lastTime = this.lastMessageTime.get(contactId);
+        if (!lastTime) return;
+        const timeSince = Date.now() - lastTime;
+        const min = cfg.min_message_interval || 20000;
+        if (timeSince < min) {
+            const remaining = min - timeSince;
+            logger.info(session.accountName,
+                `⏳ rate-limit ${contactId}: aguardando ${formatDelay(remaining)} antes de responder`);
+            await delay(remaining);
+        }
     }
 
     /**
@@ -151,33 +188,89 @@ class MessageHandler {
     }
 
     /**
-     * Processa mensagem recebida
+     * Ponto de entrada: enfileira a mensagem na fila do chat correspondente.
+     * Múltiplas msgs do mesmo chat coalescem — uma resposta única por rajada.
      */
-    async handleMessage(session, message) {
+    handleMessage(session, message) {
         const contactId = message.from;
-        const processingKey = `${session.accountId}_${contactId}`;
 
-        logger.info(session.accountName, `🤖 handleMessage iniciado (de=${contactId}, body="${(message.body || '').slice(0, 50)}")`);
+        if (!this._shouldEnqueue(session, contactId, message.body)) return;
 
-        try {
-            if (!this.shouldProcessMessage(session, contactId, message.body)) {
-                logger.info(session.accountName, '🛑 mensagem ignorada por shouldProcessMessage');
-                return;
+        const key = `${session.accountId}:${contactId}`;
+        let q = this.chatQueues.get(key);
+        if (!q) {
+            q = { batch: [], processing: false, lastTouched: Date.now() };
+            this.chatQueues.set(key, q);
+        }
+        q.batch.push(message);
+        q.lastTouched = Date.now();
+
+        const status = q.processing ? '(em processamento, agrupando)' : '(novo, vai drenar)';
+        logger.info(session.accountName, `📋 ${contactId} batch=${q.batch.length} ${status}`);
+
+        if (!q.processing) {
+            q.processing = true;
+            this._drainChat(session, contactId, q)
+                .catch((e) => logger.error(session.accountName, `Drain ${contactId} crashou: ${e.message}`))
+                .finally(() => {
+                    q.processing = false;
+                    // GC: se ficou idle e batch vazio, marca pra possível remoção
+                    if (q.batch.length === 0) {
+                        // remove se não for tocada em 30 min (evita memória crescer indefinidamente)
+                        setTimeout(() => {
+                            const cur = this.chatQueues.get(key);
+                            if (cur && !cur.processing && cur.batch.length === 0 && (Date.now() - cur.lastTouched) > 30 * 60_000) {
+                                this.chatQueues.delete(key);
+                            }
+                        }, 30 * 60_000).unref?.();
+                    }
+                });
+        }
+    }
+
+    /**
+     * Drena a fila de UM chat. Coalesce o batch atual em uma única resposta:
+     * - marca TODAS as msgs do snapshot como lidas (ticket azul);
+     * - responde apenas à mais recente.
+     * Se durante a resposta chegarem mais msgs no batch, faz outra rodada (nova rajada).
+     */
+    async _drainChat(session, contactId, q) {
+        while (q.batch.length > 0) {
+            const snapshot = q.batch.slice();
+            q.batch.length = 0;
+
+            // Comando SAIR — atende imediatamente, ignora coalescência
+            const sair = snapshot.find((m) => m.body && m.body.toLowerCase().includes('sair'));
+            if (sair) {
+                try { if (sair._raw) await session.markRead(sair._raw); } catch (_) {}
+                try {
+                    await this.handleExitCommand(session, contactId);
+                } catch (e) {
+                    logger.error(session.accountName, `handleExitCommand falhou: ${e.message}`);
+                }
+                continue;
             }
 
-            this.processing.add(processingKey);
-
-            if (message.body && message.body.toLowerCase().includes('sair')) {
-                await this.handleExitCommand(session, contactId);
-                return;
+            // Marca TODAS as msgs do snapshot como lidas (ticket azul real)
+            for (const m of snapshot) {
+                try { if (m._raw) await session.markRead(m._raw); } catch (_) {}
             }
+            logger.info(session.accountName, `👁️  Lidas (ticket azul) ${snapshot.length} msg(s) de ${contactId}`);
 
-            await this.processNormalMessage(session, contactId, message);
+            // Escolhe a mais recente como alvo da resposta
+            snapshot.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            const target = snapshot[snapshot.length - 1];
 
-        } catch (error) {
-            logger.error(session.accountName, `Erro ao processar mensagem de ${contactId}: ${error.message}\n${error.stack || ''}`);
-        } finally {
-            this.processing.delete(processingKey);
+            // Gates ANTES da resposta (não descartam, apenas seguram)
+            await this._waitGlobalPause(session, contactId);
+            await this._waitRateLimit(session, contactId);
+
+            try {
+                await this.processNormalMessage(session, contactId, target);
+            } catch (e) {
+                logger.error(session.accountName, `Falha drenando ${contactId}: ${e.message}\n${e.stack || ''}`);
+            }
+            // Loop continua se chegaram novas msgs durante o processamento
         }
     }
 
@@ -210,17 +303,18 @@ class MessageHandler {
     }
 
     /**
-     * Processa mensagem normal
+     * Processa UMA resposta (a mensagem alvo da rajada). Já chega com:
+     *  - todas as msgs da rajada lidas (ticket azul) pelo `_drainChat`
+     *  - gates de pausa global e rate-limit já liberados
      */
     async processNormalMessage(session, contactId, message = null) {
+        const t0 = Date.now();
         try {
             const config = this.getAccountConfig(session);
-            logger.info(session.accountName, `▶️  processNormalMessage status=${session.status}`);
-
             const chat = await session.getChat(contactId);
             const isGroup = contactId.includes('@g.us');
 
-            // Nome do contato/grupo: prioriza dados que vieram com a mensagem (rápido e confiável)
+            // Nome do contato/grupo
             let name = 'Cliente';
             if (isGroup) {
                 name = (chat && chat.name) || 'Grupo';
@@ -233,58 +327,58 @@ class MessageHandler {
                 } catch (_) {}
             }
 
-            logger.messageReceived(session.accountName, name, isGroup);
+            logger.info(session.accountName,
+                `▶️  processNormalMessage chat=${contactId} isGroup=${isGroup} alvo="${(message && message.body || '').slice(0, 60)}" status=${session.status}`);
 
-            // Marca como visto + delay curto
-            try { await chat.sendSeen(); } catch (e) { logger.warn(session.accountName, `sendSeen falhou: ${e.message}`); }
-            await delay(2000);
-
-            // Obtém comportamento humano com configurações da conta
             const interactionCount = this.interactions.get(contactId) || 0;
             const isFirstInteraction = interactionCount === 0;
 
-            // Gera mensagem apropriada
             const responseText = await this.getResponseMessage(session, contactId, name, isGroup, isFirstInteraction);
 
-            // Usa configurações da conta para delays
-            const behavior = {
-                readDelay: Math.floor(Math.random() * (config.max_read_delay - config.min_read_delay) + config.min_read_delay),
-                typingDelay: Math.floor(Math.random() * (config.max_typing_delay - config.min_typing_delay) + config.min_typing_delay),
-                responseDelay: Math.floor(Math.random() * (config.max_response_delay - config.min_response_delay) + config.min_response_delay),
-                shouldIgnore: Math.random() * 100 < config.ignore_probability
-            };
+            // Delays randomizados dentro das ranges da conta
+            const readDelay     = Math.floor(Math.random() * (config.max_read_delay     - config.min_read_delay)     + config.min_read_delay);
+            const typingDelay   = Math.floor(Math.random() * (config.max_typing_delay   - config.min_typing_delay)   + config.min_typing_delay);
+            const responseDelay = Math.floor(Math.random() * (config.max_response_delay - config.min_response_delay) + config.min_response_delay);
+            const shouldIgnore  = Math.random() * 100 < (config.ignore_probability || 0);
 
-            // Verifica se deve ignorar (comportamento humano)
-            if (behavior.shouldIgnore && !isFirstInteraction) {
-                logger.behavior(session.accountName, 'Ignorando mensagem', 'probabilidade');
+            logger.info(session.accountName,
+                `🎭 readDelay ${formatDelay(readDelay)} | typingDelay ${formatDelay(typingDelay)} | responseDelay ${formatDelay(responseDelay)}`);
+
+            // Comportamento humano: probabilidade de ignorar (não na primeira interação)
+            if (shouldIgnore && !isFirstInteraction) {
+                logger.info(session.accountName, `🙈 ignorando "${(message && message.body || '').slice(0, 40)}" (ignore_probability)`);
                 return;
             }
 
-            // Delay de leitura
-            logger.behavior(session.accountName, 'Delay de leitura', formatDelay(behavior.readDelay));
-            await delay(behavior.readDelay);
+            // 1) tempo "lendo"
+            await delay(readDelay);
 
-            // Simula digitação
-            logger.behavior(session.accountName, 'Digitando', formatDelay(behavior.typingDelay));
-            await simulateTyping(chat, behavior.typingDelay);
+            // 2) presença "digitando..." durante typingDelay (continua pulsando a cada 3s)
+            logger.info(session.accountName, `⌨️  Digitando por ${formatDelay(typingDelay)}`);
+            try { await simulateTyping(chat, typingDelay); } catch (e) { logger.warn(session.accountName, `simulateTyping: ${e.message}`); }
 
-            // Delay antes de enviar
-            logger.behavior(session.accountName, 'Delay de resposta', formatDelay(behavior.responseDelay));
-            await delay(behavior.responseDelay);
+            // 3) delay antes do envio efetivo
+            await delay(responseDelay);
 
             // Decide entre texto e mídia
-            const shouldSendMedia = config.media_enabled && interactionCount > 0 && interactionCount % config.media_interval === 0;
+            const shouldSendMedia = config.media_enabled && interactionCount > 0 && (interactionCount % (config.media_interval || 1) === 0);
 
             if (shouldSendMedia) {
                 await this.sendRandomMedia(session, contactId);
             } else {
+                logger.info(session.accountName, `📤 → ${contactId}: "${responseText}"`);
                 await session.sendMessage(contactId, responseText);
-                logger.messageSent(session.accountName, name, 'Texto');
             }
+
+            const elapsed = Date.now() - t0;
+            logger.info(session.accountName, `✅ resposta enviada em ${formatDelay(elapsed)} (rajada=${name})`);
 
             // Atualiza contadores
             this.interactions.set(contactId, interactionCount + 1);
             this.lastMessageTime.set(contactId, Date.now());
+
+            // Dispara pausa global do tipo (privado/grupo) conforme config
+            this._setGlobalPause(session, contactId);
 
             // Atualiza estatísticas no banco (tenant-scoped, nunca quebra o fluxo)
             try {
@@ -361,10 +455,18 @@ class MessageHandler {
      * Obtém estatísticas
      */
     getStats() {
+        let queued = 0;
+        let processing = 0;
+        for (const q of this.chatQueues.values()) {
+            queued += q.batch.length;
+            if (q.processing) processing++;
+        }
         return {
             totalInteractions: this.interactions.size,
             blacklistSize: this.blacklist.size,
-            processingNow: this.processing.size
+            chatsWithQueue: this.chatQueues.size,
+            queued,
+            processing
         };
     }
 }

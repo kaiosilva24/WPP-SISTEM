@@ -42,8 +42,13 @@ const TENANT_DDL = (schema) => {
             ignore_probability INTEGER DEFAULT 20,
             media_enabled BOOLEAN DEFAULT TRUE,
             media_interval INTEGER DEFAULT 2,
+            global_private_delay_minutes INTEGER DEFAULT 2,
+            global_group_delay_minutes   INTEGER DEFAULT 2,
             FOREIGN KEY (account_id) REFERENCES ${s}.accounts(id) ON DELETE CASCADE
         )`,
+        // Migrações idempotentes para tenants antigos (rodam via syncAllTenantSchemas)
+        `ALTER TABLE ${s}.account_configs ADD COLUMN IF NOT EXISTS global_private_delay_minutes INTEGER DEFAULT 2`,
+        `ALTER TABLE ${s}.account_configs ADD COLUMN IF NOT EXISTS global_group_delay_minutes   INTEGER DEFAULT 2`,
 
         `CREATE TABLE IF NOT EXISTS ${s}.account_messages (
             id SERIAL PRIMARY KEY,

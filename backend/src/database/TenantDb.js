@@ -110,7 +110,8 @@ class TenantDb {
             'proxy_enabled','proxy_ip','proxy_port','proxy_username','proxy_password',
             'min_read_delay','max_read_delay','min_typing_delay','max_typing_delay',
             'min_response_delay','max_response_delay','min_message_interval',
-            'ignore_probability','media_enabled','media_interval'
+            'ignore_probability','media_enabled','media_interval',
+            'global_private_delay_minutes','global_group_delay_minutes'
         ];
         const fields = [];
         const values = [];

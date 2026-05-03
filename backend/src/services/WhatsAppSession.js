@@ -104,7 +104,9 @@ class WhatsAppSession extends EventEmitter {
             min_message_interval: config.min_message_interval || 20000,
             ignore_probability: config.ignore_probability || 20,
             media_enabled: config.media_enabled !== undefined ? config.media_enabled : true,
-            media_interval: config.media_interval || 2
+            media_interval: config.media_interval || 2,
+            global_private_delay_minutes: config.global_private_delay_minutes != null ? config.global_private_delay_minutes : 2,
+            global_group_delay_minutes:   config.global_group_delay_minutes   != null ? config.global_group_delay_minutes   : 2
         };
 
         this.stats = {
@@ -114,6 +116,12 @@ class WhatsAppSession extends EventEmitter {
             startTime: null,
             lastActivity: null
         };
+
+        // Dedup de message ids (append + notify após reconnect entregam o mesmo msg.id duplicado).
+        // Ring buffer simples: Set + array LIFO pra manter os últimos N ids.
+        this._seenMsgIds = new Set();
+        this._seenMsgOrder = [];
+        this._seenMsgCap = 200;
 
         this.runtimeOptions = {};
 
@@ -257,12 +265,41 @@ class WhatsAppSession extends EventEmitter {
         }
     }
 
+    _markMsgSeen(id) {
+        if (!id) return false;
+        if (this._seenMsgIds.has(id)) return true;
+        this._seenMsgIds.add(id);
+        this._seenMsgOrder.push(id);
+        if (this._seenMsgOrder.length > this._seenMsgCap) {
+            const old = this._seenMsgOrder.shift();
+            this._seenMsgIds.delete(old);
+        }
+        return false;
+    }
+
+    _adaptBaileysMessage(m) {
+        return {
+            from: m.key.remoteJid,
+            body: extractText(m),
+            pushName: m.pushName || null,
+            participant: m.key.participant || null,
+            timestamp: typeof m.messageTimestamp === 'number' ? m.messageTimestamp : Number(m.messageTimestamp || 0),
+            hasMedia: hasMediaIn(m),
+            _raw: m
+        };
+    }
+
     async _onMessagesUpsert({ messages, type }) {
         logger.info(this.accountName, `📥 messages.upsert (type=${type}, count=${messages ? messages.length : 0})`);
-        if (type !== 'notify') {
+        if (type !== 'notify' && type !== 'append') {
             logger.debug(this.accountName, `⏭️  ignorando upsert type=${type}`);
             return;
         }
+
+        const HORIZON_SEC = 24 * 60 * 60; // 24h pra histórico
+        const nowSec = Math.floor(Date.now() / 1000);
+        let emitted = 0;
+
         for (const m of messages) {
             if (!m || !m.message) {
                 logger.debug(this.accountName, '⏭️  msg sem .message (provável protocol/notification)');
@@ -272,22 +309,45 @@ class WhatsAppSession extends EventEmitter {
                 logger.debug(this.accountName, `⏭️  fromMe (jid=${m.key.remoteJid})`);
                 continue;
             }
-            const from = m.key.remoteJid;
-            const body = extractText(m);
-            const adapted = {
-                from,
-                body,
-                pushName: m.pushName || null,
-                participant: m.key.participant || null,
-                timestamp: typeof m.messageTimestamp === 'number' ? m.messageTimestamp : Number(m.messageTimestamp || 0),
-                hasMedia: hasMediaIn(m),
-                _raw: m
-            };
-            logger.info(this.accountName, `📨 nova msg de ${from} pushName="${adapted.pushName}" body="${(body || '').slice(0, 60)}" hasMedia=${adapted.hasMedia}`);
+            // Dedup append+notify
+            const seen = this._markMsgSeen(m.key && m.key.id);
+            if (seen) {
+                logger.debug(this.accountName, `⏭️  msg id já vista: ${m.key.id}`);
+                continue;
+            }
+            // Janela de 24h só pra histórico (append)
+            if (type === 'append' && m.messageTimestamp && (nowSec - Number(m.messageTimestamp)) > HORIZON_SEC) {
+                logger.debug(this.accountName, `⏭️  append antigo ignorado (jid=${m.key.remoteJid})`);
+                continue;
+            }
+
+            const adapted = this._adaptBaileysMessage(m);
+            logger.info(this.accountName,
+                `📨 [${type}] ${adapted.from} pushName="${adapted.pushName}" body="${(adapted.body || '').slice(0, 60)}" hasMedia=${adapted.hasMedia}`);
             this.stats.messagesReceived++;
             this.stats.lastActivity = Date.now();
-            this.stats.uniqueContacts.add(from);
+            this.stats.uniqueContacts.add(adapted.from);
             this.emit('message', adapted);
+            emitted++;
+        }
+
+        if (type === 'append') {
+            logger.info(this.accountName, `📜 histórico: ${messages.length} msgs sync, ${emitted} entregues à fila`);
+        }
+    }
+
+    /**
+     * Marca uma mensagem como lida (ticket azul).
+     * Aceita o objeto Baileys completo OU só a `key`.
+     */
+    async markRead(keyOrMsg) {
+        if (!this.sock) return;
+        const key = keyOrMsg && keyOrMsg.key ? keyOrMsg.key : keyOrMsg;
+        if (!key || !key.remoteJid) return;
+        try {
+            await this.sock.readMessages([key]);
+        } catch (e) {
+            logger.warn(this.accountName, `markRead falhou: ${e.message}`);
         }
     }
 
@@ -356,15 +416,21 @@ class WhatsAppSession extends EventEmitter {
         const filename = path.basename(filePath);
         const kind = mediaTypeFromExt(filename);
 
+        // fileName aleatório a cada envio: disfarça reenvio do mesmo arquivo.
+        const ext = path.extname(filename) || '';
+        const randomFileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+
         let payload;
         switch (kind) {
-            case 'image':   payload = { image: buf, caption: caption || undefined }; break;
-            case 'video':   payload = { video: buf, caption: caption || undefined }; break;
-            case 'audio':   payload = { audio: buf, mimetype: 'audio/mp4', ptt: false }; break;
-            case 'sticker': payload = { sticker: buf }; break;
-            case 'vcard':   payload = { document: buf, mimetype: 'text/vcard', fileName: filename }; break;
-            default:        payload = { document: buf, mimetype: 'application/octet-stream', fileName: filename, caption: caption || undefined };
+            case 'image':   payload = { image: buf, caption: caption || undefined, fileName: randomFileName }; break;
+            case 'video':   payload = { video: buf, caption: caption || undefined, fileName: randomFileName }; break;
+            case 'audio':   payload = { audio: buf, mimetype: 'audio/mp4', ptt: false, fileName: randomFileName }; break;
+            case 'sticker': payload = { sticker: buf, fileName: randomFileName }; break;
+            case 'vcard':   payload = { document: buf, mimetype: 'text/vcard', fileName: randomFileName }; break;
+            default:        payload = { document: buf, mimetype: 'application/octet-stream', fileName: randomFileName, caption: caption || undefined };
         }
+
+        logger.info(this.accountName, `🎵 mídia → ${jid}: ${filename} (kind=${kind}, alias=${randomFileName})`);
 
         await this.sock.sendMessage(jid, payload);
         this.stats.messagesSent++;

@@ -73,7 +73,7 @@ async function expirySweep() {
 }
 
 // Marca de versão usada no boot pra confirmar qual build está realmente rodando.
-const BUILD_TAG = 'baileys-tdb-fix-2026-05-03b';
+const BUILD_TAG = 'baileys-fila-coalesce-ticket-azul-pausa-global-2026-05-03c';
 
 async function main() {
     try {
