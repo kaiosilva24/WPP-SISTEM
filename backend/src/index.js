@@ -73,7 +73,7 @@ async function expirySweep() {
 }
 
 // Marca de versão usada no boot pra confirmar qual build está realmente rodando.
-const BUILD_TAG = 'baileys-fila-coalesce-ticket-azul-pausa-global-2026-05-03c';
+const BUILD_TAG = 'humanizado-readDelay-recording-snapshot-2026-05-03d';
 
 async function main() {
     try {

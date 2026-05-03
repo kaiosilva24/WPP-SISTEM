@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../database/DatabaseManager');
 const logger = require('../utils/logger');
-const { delay, getHumanBehaviorSequence, simulateTyping, formatDelay } = require('../utils/humanBehavior');
+const { delay, getHumanBehaviorSequence, simulateTyping, simulateRecording, formatDelay } = require('../utils/humanBehavior');
 const { getFirstResponse, getFollowUpResponse, getGroupGreeting } = require('../utils/messageTemplates');
 
 /**
@@ -81,31 +81,29 @@ class MessageHandler {
     }
 
     /**
-     * Filtros baratos antes de enfileirar.
-     * Concorrência (já processando) e rate-limit viraram GATES dentro do drain — não descartam mais.
+     * Filtros baratos antes de enfileirar. ACEITAMOS msgs sem texto também — assim o drain
+     * consegue marcá-las como lidas (ticket azul), mesmo que não responda.
+     * Concorrência e rate-limit viraram GATES dentro do drain — não descartam mais.
      */
-    _shouldEnqueue(session, contactId, messageBody) {
-        // Ignora mensagens do próprio número
+    _shouldEnqueue(session, contactId) {
         const myUser = session.client && session.client.info && session.client.info.wid && session.client.info.wid.user;
         if (myUser && contactId.startsWith(myUser)) {
             logger.messageIgnored(session.accountName, contactId, 'próprio número');
             return false;
         }
-
-        // Mensagens sem texto (sticker/audio sem caption etc) — não respondem por templates de texto.
-        if (!messageBody || typeof messageBody !== 'string' || messageBody.trim().length === 0) {
-            logger.messageIgnored(session.accountName, contactId, 'sem texto/body');
-            return false;
-        }
-
-        // Verifica blacklist
         const phoneNumber = contactId.split('@')[0];
         if (this.blacklist.has(phoneNumber)) {
             logger.messageIgnored(session.accountName, contactId, 'na blacklist');
             return false;
         }
-
         return true;
+    }
+
+    /**
+     * Determina se a msg tem texto suficiente pra disparar uma resposta de template.
+     */
+    _hasReplyableText(message) {
+        return !!(message && typeof message.body === 'string' && message.body.trim().length > 0);
     }
 
     /**
@@ -194,7 +192,7 @@ class MessageHandler {
     handleMessage(session, message) {
         const contactId = message.from;
 
-        if (!this._shouldEnqueue(session, contactId, message.body)) return;
+        if (!this._shouldEnqueue(session, contactId)) return;
 
         const key = `${session.accountId}:${contactId}`;
         let q = this.chatQueues.get(key);
@@ -206,7 +204,13 @@ class MessageHandler {
         q.lastTouched = Date.now();
 
         const status = q.processing ? '(em processamento, agrupando)' : '(novo, vai drenar)';
-        logger.info(session.accountName, `📋 ${contactId} batch=${q.batch.length} ${status}`);
+        const bodyPreview = this._hasReplyableText(message)
+            ? `body="${message.body.slice(0, 40)}"`
+            : `(sem texto, será só lida)`;
+        logger.info(session.accountName, `📋 ${contactId} batch=${q.batch.length} ${status} ${bodyPreview}`);
+
+        // Snapshot global da fila pra essa sessão
+        this._logQueueSnapshot(session);
 
         if (!q.processing) {
             q.processing = true;
@@ -229,39 +233,98 @@ class MessageHandler {
     }
 
     /**
-     * Drena a fila de UM chat. Coalesce o batch atual em uma única resposta:
-     * - marca TODAS as msgs do snapshot como lidas (ticket azul);
-     * - responde apenas à mais recente.
+     * Loga um snapshot da fila pra essa sessão: lista de chats com msgs pendentes.
+     * Aparece nos "Terminais Ao Vivo" toda vez que uma msg chega ou é respondida.
+     */
+    _logQueueSnapshot(session) {
+        const lines = [];
+        let totalQueued = 0;
+        let active = 0;
+        const prefix = `${session.accountId}:`;
+        for (const [key, q] of this.chatQueues.entries()) {
+            if (!key.startsWith(prefix)) continue;
+            if (q.batch.length === 0 && !q.processing) continue;
+            const chatId = key.slice(prefix.length);
+            const flag = q.processing ? '🔄' : '⏳';
+            const isGroup = chatId.endsWith('@g.us') ? '[grupo]' : '[priv]';
+            lines.push(`   ${flag} ${isGroup} ${chatId}: ${q.batch.length} pendente(s)`);
+            totalQueued += q.batch.length;
+            if (q.processing) active++;
+        }
+        if (lines.length === 0) {
+            logger.info(session.accountName, '📊 Fila vazia');
+            return;
+        }
+        logger.info(session.accountName,
+            `📊 Fila (${this.chatQueues.size} chat(s) total, ${active} processando, ${totalQueued} pendente(s)):\n${lines.join('\n')}`);
+    }
+
+    /**
+     * Drena a fila de UM chat. Para cada rajada (snapshot do batch atual):
+     *   1. readDelay aleatório — comportamento humano: "ainda não vi a mensagem"
+     *   2. markRead em todas as msgs do snapshot — ticket azul
+     *   3. (se houver msg com texto) → processNormalMessage com o alvo mais recente
+     *   4. (se não houver texto) → loga "lidas, sem texto pra responder"
+     *
      * Se durante a resposta chegarem mais msgs no batch, faz outra rodada (nova rajada).
      */
     async _drainChat(session, contactId, q) {
+        const cfg = this.getAccountConfig(session);
+
         while (q.batch.length > 0) {
             const snapshot = q.batch.slice();
             q.batch.length = 0;
 
-            // Comando SAIR — atende imediatamente, ignora coalescência
+            // Comando SAIR — atende imediatamente, ignora coalescência (mas ainda respeita read delay)
             const sair = snapshot.find((m) => m.body && m.body.toLowerCase().includes('sair'));
             if (sair) {
-                try { if (sair._raw) await session.markRead(sair._raw); } catch (_) {}
                 try {
+                    const rd = this._randomBetween(cfg.min_read_delay, cfg.max_read_delay);
+                    logger.info(session.accountName, `🕒 readDelay ${formatDelay(rd)} antes de abrir chat ${contactId}`);
+                    await delay(rd);
+                    if (sair._raw) await session.markRead(sair._raw);
+                    logger.info(session.accountName, `👁️  Lida (ticket azul) — comando SAIR de ${contactId}`);
                     await this.handleExitCommand(session, contactId);
                 } catch (e) {
                     logger.error(session.accountName, `handleExitCommand falhou: ${e.message}`);
                 }
+                this._logQueueSnapshot(session);
                 continue;
             }
 
-            // Marca TODAS as msgs do snapshot como lidas (ticket azul real)
+            // 1) readDelay aleatório ANTES de marcar como lido (humano não vê na hora)
+            const readDelay = this._randomBetween(cfg.min_read_delay, cfg.max_read_delay);
+            logger.info(session.accountName,
+                `🕒 readDelay ${formatDelay(readDelay)} antes de abrir chat ${contactId} (${snapshot.length} msg(s) na rajada)`);
+            await delay(readDelay);
+
+            // 2) Marca TODAS as msgs do snapshot como lidas (ticket azul real, agora sim)
+            let readOk = 0;
             for (const m of snapshot) {
-                try { if (m._raw) await session.markRead(m._raw); } catch (_) {}
+                try {
+                    if (m._raw) {
+                        await session.markRead(m._raw);
+                        readOk++;
+                    }
+                } catch (_) {}
             }
-            logger.info(session.accountName, `👁️  Lidas (ticket azul) ${snapshot.length} msg(s) de ${contactId}`);
+            logger.info(session.accountName, `👁️  Lidas (ticket azul) ${readOk}/${snapshot.length} msg(s) de ${contactId}`);
 
-            // Escolhe a mais recente como alvo da resposta
+            // 3) Pequeno delay "absorvendo" o conteúdo (1-3s)
+            await delay(1000 + Math.floor(Math.random() * 2000));
+
+            // 4) Escolhe alvo: a mais recente COM texto. Se não houver, só ficou marcado como lido.
             snapshot.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-            const target = snapshot[snapshot.length - 1];
+            const replyable = snapshot.filter((m) => this._hasReplyableText(m));
+            if (replyable.length === 0) {
+                logger.info(session.accountName,
+                    `📭 ${contactId}: ${snapshot.length} msg(s) lida(s), sem texto pra responder (provável mídia/figurinha)`);
+                this._logQueueSnapshot(session);
+                continue;
+            }
+            const target = replyable[replyable.length - 1];
 
-            // Gates ANTES da resposta (não descartam, apenas seguram)
+            // Gates de pausa global e rate-limit (seguram, não descartam)
             await this._waitGlobalPause(session, contactId);
             await this._waitRateLimit(session, contactId);
 
@@ -270,8 +333,17 @@ class MessageHandler {
             } catch (e) {
                 logger.error(session.accountName, `Falha drenando ${contactId}: ${e.message}\n${e.stack || ''}`);
             }
-            // Loop continua se chegaram novas msgs durante o processamento
+
+            // Após cada resposta, snapshot atualizado
+            this._logQueueSnapshot(session);
         }
+    }
+
+    _randomBetween(min, max) {
+        const lo = Number(min) || 0;
+        const hi = Number(max) || lo;
+        if (hi <= lo) return lo;
+        return Math.floor(Math.random() * (hi - lo) + lo);
     }
 
     /**
@@ -305,7 +377,11 @@ class MessageHandler {
     /**
      * Processa UMA resposta (a mensagem alvo da rajada). Já chega com:
      *  - todas as msgs da rajada lidas (ticket azul) pelo `_drainChat`
+     *  - readDelay já consumido pelo `_drainChat` (humano abriu o chat)
      *  - gates de pausa global e rate-limit já liberados
+     *
+     * Aqui acontece: pré-escolha do que vai enviar (texto ou mídia + kind),
+     * presença adequada (digitando OU gravando), responseDelay, envio.
      */
     async processNormalMessage(session, contactId, message = null) {
         const t0 = Date.now();
@@ -327,51 +403,81 @@ class MessageHandler {
                 } catch (_) {}
             }
 
+            const targetBody = (message && message.body || '').slice(0, 60);
             logger.info(session.accountName,
-                `▶️  processNormalMessage chat=${contactId} isGroup=${isGroup} alvo="${(message && message.body || '').slice(0, 60)}" status=${session.status}`);
+                `▶️  processNormalMessage chat=${contactId} isGroup=${isGroup} alvo="${targetBody}" status=${session.status}`);
 
             const interactionCount = this.interactions.get(contactId) || 0;
             const isFirstInteraction = interactionCount === 0;
 
             const responseText = await this.getResponseMessage(session, contactId, name, isGroup, isFirstInteraction);
 
-            // Delays randomizados dentro das ranges da conta
-            const readDelay     = Math.floor(Math.random() * (config.max_read_delay     - config.min_read_delay)     + config.min_read_delay);
-            const typingDelay   = Math.floor(Math.random() * (config.max_typing_delay   - config.min_typing_delay)   + config.min_typing_delay);
-            const responseDelay = Math.floor(Math.random() * (config.max_response_delay - config.min_response_delay) + config.min_response_delay);
+            // Delays randomizados (readDelay foi consumido no drain)
+            const typingDelay   = this._randomBetween(config.min_typing_delay,   config.max_typing_delay);
+            const responseDelay = this._randomBetween(config.min_response_delay, config.max_response_delay);
             const shouldIgnore  = Math.random() * 100 < (config.ignore_probability || 0);
-
-            logger.info(session.accountName,
-                `🎭 readDelay ${formatDelay(readDelay)} | typingDelay ${formatDelay(typingDelay)} | responseDelay ${formatDelay(responseDelay)}`);
 
             // Comportamento humano: probabilidade de ignorar (não na primeira interação)
             if (shouldIgnore && !isFirstInteraction) {
-                logger.info(session.accountName, `🙈 ignorando "${(message && message.body || '').slice(0, 40)}" (ignore_probability)`);
+                logger.info(session.accountName,
+                    `🙈 ignorando "${targetBody}" (ignore_probability=${config.ignore_probability}%)`);
                 return;
             }
 
-            // 1) tempo "lendo"
-            await delay(readDelay);
+            // Pré-escolhe se vai enviar mídia E qual tipo (pra escolher a presença certa)
+            const shouldSendMedia = !!config.media_enabled
+                && interactionCount > 0
+                && (interactionCount % (config.media_interval || 1) === 0);
 
-            // 2) presença "digitando..." durante typingDelay (continua pulsando a cada 3s)
-            logger.info(session.accountName, `⌨️  Digitando por ${formatDelay(typingDelay)}`);
-            try { await simulateTyping(chat, typingDelay); } catch (e) { logger.warn(session.accountName, `simulateTyping: ${e.message}`); }
+            let mediaPick = null;
+            if (shouldSendMedia) {
+                mediaPick = this.pickRandomMedia(session);
+                if (!mediaPick) {
+                    logger.warn(session.accountName, 'media_enabled=true mas não há arquivos disponíveis — caindo pra texto');
+                }
+            }
 
-            // 3) delay antes do envio efetivo
+            const willSendAudio = !!(mediaPick && mediaPick.kind === 'audio');
+            const presenceKind = willSendAudio ? 'gravando' : 'digitando';
+
+            logger.info(session.accountName,
+                `🎭 typingDelay ${formatDelay(typingDelay)} | responseDelay ${formatDelay(responseDelay)} | ação=${willSendAudio ? 'áudio' : (mediaPick ? mediaPick.kind : 'texto')}`);
+
+            // Presença: digitando OU gravando, durante typingDelay
+            logger.info(session.accountName, `⌨️  ${presenceKind} por ${formatDelay(typingDelay)}`);
+            try {
+                if (willSendAudio) {
+                    await simulateRecording(chat, typingDelay);
+                } else {
+                    await simulateTyping(chat, typingDelay);
+                }
+            } catch (e) {
+                logger.warn(session.accountName, `simulate ${presenceKind}: ${e.message}`);
+            }
+
+            // Limpa estado de presença (paused) — sutileza humana
+            try { if (chat.clearState) await chat.clearState(); } catch (_) {}
+
+            // Delay final antes do envio
             await delay(responseDelay);
 
-            // Decide entre texto e mídia
-            const shouldSendMedia = config.media_enabled && interactionCount > 0 && (interactionCount % (config.media_interval || 1) === 0);
-
-            if (shouldSendMedia) {
-                await this.sendRandomMedia(session, contactId);
+            // Envia
+            if (mediaPick) {
+                logger.info(session.accountName, `📤 → ${contactId}: [${mediaPick.kind}] ${path.basename(mediaPick.path)}`);
+                try {
+                    await session.sendMedia(contactId, mediaPick.path);
+                } catch (e) {
+                    logger.error(session.accountName, `Falha enviando mídia, caindo pra texto: ${e.message}`);
+                    logger.info(session.accountName, `📤 → ${contactId}: "${responseText}"`);
+                    await session.sendMessage(contactId, responseText);
+                }
             } else {
                 logger.info(session.accountName, `📤 → ${contactId}: "${responseText}"`);
                 await session.sendMessage(contactId, responseText);
             }
 
             const elapsed = Date.now() - t0;
-            logger.info(session.accountName, `✅ resposta enviada em ${formatDelay(elapsed)} (rajada=${name})`);
+            logger.info(session.accountName, `✅ resposta enviada em ${formatDelay(elapsed)} pra ${name}`);
 
             // Atualiza contadores
             this.interactions.set(contactId, interactionCount + 1);
@@ -398,44 +504,66 @@ class MessageHandler {
     }
 
     /**
-     * Envia mídia aleatória. Procura na pasta do tenant e cai pra defaults globais.
-     * Estrutura esperada: media/[tenant-N/]{images,videos,stickers,audio}/<arquivo>
+     * Coleta arquivos de mídia disponíveis pra essa conta (tenant + defaults).
+     * Estrutura: media/[tenant-N/]{images,videos,stickers,audio}/<arquivo>
+     */
+    _collectMediaCandidates(session) {
+        const baseRoot = path.join(__dirname, '..', '..', '..', 'media');
+        const tenantSegment = session.tenantId ? `tenant-${session.tenantId}` : null;
+        const candidates = [];
+        const subcats = ['images', 'videos', 'stickers', 'audio'];
+        const exts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.mp3', '.ogg', '.m4a'];
+
+        const collect = (dir) => {
+            if (!fs.existsSync(dir)) return;
+            for (const f of fs.readdirSync(dir)) {
+                if (f.startsWith('.')) continue;
+                const full = path.join(dir, f);
+                try {
+                    if (fs.statSync(full).isFile() && exts.some((e) => f.toLowerCase().endsWith(e))) {
+                        candidates.push(full);
+                    }
+                } catch (_) {}
+            }
+        };
+        for (const cat of subcats) {
+            if (tenantSegment) collect(path.join(baseRoot, tenantSegment, cat));
+            collect(path.join(baseRoot, cat));
+        }
+        return candidates;
+    }
+
+    _kindOfMedia(filePath) {
+        const ext = path.extname(filePath).toLowerCase();
+        if (['.jpg', '.jpeg', '.png', '.gif'].includes(ext)) return 'image';
+        if (ext === '.webp') return 'sticker';
+        if (['.mp4', '.mov'].includes(ext)) return 'video';
+        if (['.mp3', '.ogg', '.m4a'].includes(ext)) return 'audio';
+        return 'document';
+    }
+
+    /**
+     * Sorteia uma mídia aleatória. Retorna { path, kind } ou null se não houver.
+     */
+    pickRandomMedia(session) {
+        const candidates = this._collectMediaCandidates(session);
+        if (candidates.length === 0) return null;
+        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+        return { path: chosen, kind: this._kindOfMedia(chosen) };
+    }
+
+    /**
+     * Envia mídia aleatória (façade — usado fora do drain quando não precisa pré-saber kind).
      */
     async sendRandomMedia(session, contactId) {
+        const pick = this.pickRandomMedia(session);
+        if (!pick) {
+            logger.warn(session.accountName, 'Nenhum arquivo de mídia encontrado');
+            return;
+        }
         try {
-            const baseRoot = path.join(__dirname, '..', '..', '..', 'media');
-            const tenantSegment = session.tenantId ? `tenant-${session.tenantId}` : null;
-            const candidates = [];
-            const subcats = ['images', 'videos', 'stickers', 'audio'];
-            const exts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.mp3', '.ogg', '.m4a'];
-
-            const collect = (dir) => {
-                if (!fs.existsSync(dir)) return;
-                for (const f of fs.readdirSync(dir)) {
-                    if (f.startsWith('.')) continue;
-                    const full = path.join(dir, f);
-                    try {
-                        if (fs.statSync(full).isFile() && exts.some((e) => f.toLowerCase().endsWith(e))) {
-                            candidates.push(full);
-                        }
-                    } catch (_) {}
-                }
-            };
-
-            for (const cat of subcats) {
-                if (tenantSegment) collect(path.join(baseRoot, tenantSegment, cat));
-                collect(path.join(baseRoot, cat));
-            }
-
-            if (candidates.length === 0) {
-                logger.warn(session.accountName, 'Nenhum arquivo de mídia encontrado');
-                return;
-            }
-
-            const mediaPath = candidates[Math.floor(Math.random() * candidates.length)];
-            await session.sendMedia(contactId, mediaPath);
-
-            logger.messageSent(session.accountName, contactId, `Mídia (${path.basename(mediaPath)})`);
+            await session.sendMedia(contactId, pick.path);
+            logger.messageSent(session.accountName, contactId, `Mídia (${path.basename(pick.path)})`);
         } catch (error) {
             logger.error(session.accountName, `Erro ao enviar mídia: ${error.message}`);
         }

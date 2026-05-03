@@ -103,20 +103,34 @@ function getHumanBehaviorSequence(messageText = '') {
 }
 
 /**
- * Simula digitação gradual (envia estado de digitação em intervalos)
+ * Simula digitação gradual (envia estado "composing" em intervalos de 3s)
  */
 async function simulateTyping(chat, duration) {
-    const intervals = Math.floor(duration / 3000); // A cada 3 segundos
-
+    const intervals = Math.floor(duration / 3000);
     for (let i = 0; i < intervals; i++) {
         await chat.sendStateTyping();
         await delay(3000);
     }
-
-    // Delay final
     const remaining = duration % 3000;
     if (remaining > 0) {
         await chat.sendStateTyping();
+        await delay(remaining);
+    }
+}
+
+/**
+ * Simula gravação de áudio (envia estado "recording" em intervalos de 3s).
+ * Usado quando o bot vai enviar áudio em vez de texto.
+ */
+async function simulateRecording(chat, duration) {
+    const intervals = Math.floor(duration / 3000);
+    for (let i = 0; i < intervals; i++) {
+        if (chat.sendStateRecording) await chat.sendStateRecording();
+        await delay(3000);
+    }
+    const remaining = duration % 3000;
+    if (remaining > 0) {
+        if (chat.sendStateRecording) await chat.sendStateRecording();
         await delay(remaining);
     }
 }
@@ -140,5 +154,6 @@ module.exports = {
     getActivityMultiplier,
     getHumanBehaviorSequence,
     simulateTyping,
+    simulateRecording,
     formatDelay
 };
