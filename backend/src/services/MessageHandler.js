@@ -28,6 +28,11 @@ class MessageHandler {
         this.globalPrivatePauseUntil = new Map();
         this.globalGroupPauseUntil   = new Map();
 
+        // Lock global por sessão (accountId): serializa o `processNormalMessage` entre chats da
+        // mesma conta. Humano não digita em 2 chats ao mesmo tempo no celular — então 1 envio
+        // por vez por conta. Drains de chats diferentes ainda esperam essa fila.
+        this.sessionSendLock = new Map(); // accountId → Promise (chain)
+
         // Carrega blacklist do arquivo
         this.loadBlacklist();
     }
@@ -328,8 +333,11 @@ class MessageHandler {
             await this._waitGlobalPause(session, contactId);
             await this._waitRateLimit(session, contactId);
 
+            // Lock global por sessão: só 1 chat por vez digita+envia
             try {
-                await this.processNormalMessage(session, contactId, target);
+                await this._withSessionSendLock(session, contactId, async () => {
+                    await this.processNormalMessage(session, contactId, target);
+                });
             } catch (e) {
                 logger.error(session.accountName, `Falha drenando ${contactId}: ${e.message}\n${e.stack || ''}`);
             }
@@ -344,6 +352,38 @@ class MessageHandler {
         const hi = Number(max) || lo;
         if (hi <= lo) return lo;
         return Math.floor(Math.random() * (hi - lo) + lo);
+    }
+
+    /**
+     * Lock global por sessão (accountId): só 1 chat por vez digita+envia na MESMA conta.
+     * Outros drains aguardam na fila do lock antes de chamar processNormalMessage.
+     * Comportamento humano: humano não digita em N chats simultâneos no mesmo celular.
+     */
+    async _withSessionSendLock(session, contactId, fn) {
+        const accountId = session.accountId;
+        const prev = this.sessionSendLock.get(accountId) || Promise.resolve();
+        let release;
+        const cur = new Promise((r) => { release = r; });
+        const chained = prev.then(() => cur);
+        this.sessionSendLock.set(accountId, chained);
+
+        const tWait = Date.now();
+        await prev;
+        const waited = Date.now() - tWait;
+        if (waited > 200) {
+            logger.info(session.accountName,
+                `🔒 lock global liberado pra ${contactId} (esperou ${formatDelay(waited)})`);
+        }
+
+        try {
+            return await fn();
+        } finally {
+            release();
+            // Cleanup leve: se ninguém pegou depois, remove
+            if (this.sessionSendLock.get(accountId) === chained) {
+                this.sessionSendLock.delete(accountId);
+            }
+        }
     }
 
     /**
@@ -404,11 +444,11 @@ class MessageHandler {
             }
 
             const targetBody = (message && message.body || '').slice(0, 60);
-            logger.info(session.accountName,
-                `▶️  processNormalMessage chat=${contactId} isGroup=${isGroup} alvo="${targetBody}" status=${session.status}`);
-
             const interactionCount = this.interactions.get(contactId) || 0;
             const isFirstInteraction = interactionCount === 0;
+
+            logger.info(session.accountName,
+                `▶️  processNormalMessage chat=${contactId} isGroup=${isGroup} interaction#${interactionCount + 1} alvo="${targetBody}" status=${session.status}`);
 
             const responseText = await this.getResponseMessage(session, contactId, name, isGroup, isFirstInteraction);
 
@@ -424,10 +464,15 @@ class MessageHandler {
                 return;
             }
 
-            // Pré-escolhe se vai enviar mídia E qual tipo (pra escolher a presença certa)
+            // Decide texto vs mídia: a cada `media_interval` respostas pra ESSE contato/grupo,
+            // 1 vai com mídia. interactionCount conta rajadas respondidas (não msgs recebidas).
+            const mediaInterval = Math.max(1, config.media_interval || 1);
             const shouldSendMedia = !!config.media_enabled
                 && interactionCount > 0
-                && (interactionCount % (config.media_interval || 1) === 0);
+                && (interactionCount % mediaInterval === 0);
+
+            logger.info(session.accountName,
+                `🎲 alternância texto/mídia: ${contactId} interaction#${interactionCount + 1} | media_enabled=${!!config.media_enabled} media_interval=${mediaInterval} → ${shouldSendMedia ? 'MÍDIA' : 'TEXTO'}`);
 
             let mediaPick = null;
             if (shouldSendMedia) {

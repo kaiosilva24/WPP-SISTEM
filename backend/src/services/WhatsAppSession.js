@@ -417,20 +417,30 @@ class WhatsAppSession extends EventEmitter {
         const kind = mediaTypeFromExt(filename);
 
         // fileName aleatório a cada envio: disfarça reenvio do mesmo arquivo.
-        const ext = path.extname(filename) || '';
+        const ext = path.extname(filename).toLowerCase();
         const randomFileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+
+        // Mimetype correto por extensão
+        const audioMime =
+            ext === '.ogg' ? 'audio/ogg; codecs=opus' :
+            ext === '.m4a' ? 'audio/mp4' :
+            ext === '.wav' ? 'audio/wav' :
+            'audio/mpeg'; // mp3 default
 
         let payload;
         switch (kind) {
             case 'image':   payload = { image: buf, caption: caption || undefined, fileName: randomFileName }; break;
             case 'video':   payload = { video: buf, caption: caption || undefined, fileName: randomFileName }; break;
-            case 'audio':   payload = { audio: buf, mimetype: 'audio/mp4', ptt: false, fileName: randomFileName }; break;
+            // PTT (voice note): aparece com a foto do perfil + waveform, sem nome de arquivo.
+            // SEM fileName no payload — PTT não exibe nome.
+            case 'audio':   payload = { audio: buf, mimetype: audioMime, ptt: true }; break;
             case 'sticker': payload = { sticker: buf, fileName: randomFileName }; break;
             case 'vcard':   payload = { document: buf, mimetype: 'text/vcard', fileName: randomFileName }; break;
             default:        payload = { document: buf, mimetype: 'application/octet-stream', fileName: randomFileName, caption: caption || undefined };
         }
 
-        logger.info(this.accountName, `🎵 mídia → ${jid}: ${filename} (kind=${kind}, alias=${randomFileName})`);
+        const aliasLabel = kind === 'audio' ? `(PTT, mime=${audioMime})` : `(alias=${randomFileName})`;
+        logger.info(this.accountName, `🎵 mídia → ${jid}: ${filename} (kind=${kind}) ${aliasLabel}`);
 
         await this.sock.sendMessage(jid, payload);
         this.stats.messagesSent++;

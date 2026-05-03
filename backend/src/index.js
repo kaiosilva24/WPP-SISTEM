@@ -73,7 +73,7 @@ async function expirySweep() {
 }
 
 // Marca de versão usada no boot pra confirmar qual build está realmente rodando.
-const BUILD_TAG = 'humanizado-readDelay-recording-snapshot-2026-05-03d';
+const BUILD_TAG = 'ptt-voice-lock-global-interaction-2026-05-03e';
 
 async function main() {
     try {
