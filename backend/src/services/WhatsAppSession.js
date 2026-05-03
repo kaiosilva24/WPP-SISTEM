@@ -136,6 +136,27 @@ class WhatsAppSession extends EventEmitter {
                 tenantSegment
             );
 
+            // Em Linux (Discloud/VPS), usa o Chromium do sistema (instalado via APT)
+            // pois o Chrome bundled do Puppeteer falta libs do sistema (libglib-2.0.so.0 etc.).
+            const fs = require('fs');
+            let systemChromiumPath = process.env.PUPPETEER_EXECUTABLE_PATH || null;
+            if (!systemChromiumPath && process.platform === 'linux') {
+                const candidates = [
+                    '/usr/bin/chromium',
+                    '/usr/bin/chromium-browser',
+                    '/usr/bin/google-chrome',
+                    '/usr/bin/google-chrome-stable'
+                ];
+                systemChromiumPath = candidates.find((p) => {
+                    try { return fs.existsSync(p); } catch (_) { return false; }
+                }) || null;
+            }
+            if (systemChromiumPath) {
+                logger.info(this.accountName, `Usando Chromium do sistema: ${systemChromiumPath}`);
+            } else if (process.platform === 'linux') {
+                logger.warn(this.accountName, 'Chromium do sistema não encontrado em /usr/bin — usando bundled do Puppeteer (pode falhar por falta de libs)');
+            }
+
             const clientConfig = {
                 authStrategy: new LocalAuth({
                     clientId: `account-${this.accountId}`,
@@ -143,8 +164,9 @@ class WhatsAppSession extends EventEmitter {
                 }),
                 requestTimeout: 60000,
                 puppeteer: {
-                    // Em produção (Linux), força headless. Remove executablePath para usar bundled Chromium
+                    // Em produção (Linux), força headless e usa Chromium do sistema quando disponível
                     headless: process.platform === 'linux' ? true : !startVisible,
+                    ...(systemChromiumPath ? { executablePath: systemChromiumPath } : {}),
                     // Adiciona single-process para ambientes com recursos limitados
                     bypassCSP: true,
                     args: [

@@ -39,21 +39,22 @@ Após o deploy, acesse:
 
 ## 🔧 Arquivos Importantes para DisCloud
 
-O projeto inclui o arquivo `apt` que instala automaticamente o Chromium:
+O DisCloud instala o Chromium e suas dependências através do campo `APT` no
+`discloud.config`:
 
 ```
-apt (arquivo na raiz)
-├── chromium          # Navegador
-├── libnss3           # Biblioteca SSL
-├── libatk-bridge2.0-0
-├── libgtk-3-0
-├── libasound2
-├── libxss1
-└── libgbm1
+APT=tools,chromium
 ```
 
-O código detecta automaticamente quando está rodando em Linux e:
-- Usa `/usr/bin/chromium` como navegador
+Isso instala o `chromium` em `/usr/bin/chromium` com **todas** as bibliotecas
+necessárias (libglib2.0-0, libnss3, libgtk-3-0, libasound2, libxss1, libgbm1
+etc.), evitando o erro `libglib-2.0.so.0: cannot open shared object file` do
+Chrome bundled do Puppeteer.
+
+O código (`backend/src/services/WhatsAppSession.js`) detecta automaticamente
+quando está rodando em Linux e:
+- Usa `/usr/bin/chromium` (ou `chromium-browser`/`google-chrome`) como navegador
+- Respeita `PUPPETEER_EXECUTABLE_PATH` se definido no ambiente
 - Força modo headless (sem interface gráfica)
 
 ## 📁 Estrutura do Projeto
