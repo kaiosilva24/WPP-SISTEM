@@ -81,14 +81,16 @@ class MessageHandler {
         const config = this.getAccountConfig(session);
 
         // Ignora mensagens do próprio número
-        if (session.client.info && contactId.startsWith(session.client.info.wid.user)) {
+        const myUser = session.client && session.client.info && session.client.info.wid && session.client.info.wid.user;
+        if (myUser && contactId.startsWith(myUser)) {
             logger.messageIgnored(session.accountName, contactId, 'próprio número');
             return false;
         }
 
-        // Ignora notificações de criptografia
-        if (!messageBody || messageBody.type === 'e2e_notification') {
-            logger.messageIgnored(session.accountName, contactId, 'notificação de sistema');
+        // Mensagens sem texto (sticker/audio sem caption etc) — por enquanto ignora,
+        // pois templates respondem texto; pode-se evoluir pra responder mídias depois.
+        if (!messageBody || typeof messageBody !== 'string' || messageBody.trim().length === 0) {
+            logger.messageIgnored(session.accountName, contactId, 'sem texto/body');
             return false;
         }
 
@@ -155,28 +157,26 @@ class MessageHandler {
         const contactId = message.from;
         const processingKey = `${session.accountId}_${contactId}`;
 
+        logger.info(session.accountName, `🤖 handleMessage iniciado (de=${contactId}, body="${(message.body || '').slice(0, 50)}")`);
+
         try {
-            // Verifica se deve processar
             if (!this.shouldProcessMessage(session, contactId, message.body)) {
+                logger.info(session.accountName, '🛑 mensagem ignorada por shouldProcessMessage');
                 return;
             }
 
-            // Marca como processando
             this.processing.add(processingKey);
 
-            // Verifica comando SAIR
             if (message.body && message.body.toLowerCase().includes('sair')) {
                 await this.handleExitCommand(session, contactId);
                 return;
             }
 
-            // Processa mensagem normal (passa o objeto message pra usar pushName)
             await this.processNormalMessage(session, contactId, message);
 
         } catch (error) {
-            logger.error(session.accountName, `Erro ao processar mensagem de ${contactId}: ${error.message}`);
+            logger.error(session.accountName, `Erro ao processar mensagem de ${contactId}: ${error.message}\n${error.stack || ''}`);
         } finally {
-            // Remove do processamento
             this.processing.delete(processingKey);
         }
     }
@@ -215,6 +215,8 @@ class MessageHandler {
     async processNormalMessage(session, contactId, message = null) {
         try {
             const config = this.getAccountConfig(session);
+            logger.info(session.accountName, `▶️  processNormalMessage status=${session.status}`);
+
             const chat = await session.getChat(contactId);
             const isGroup = contactId.includes('@g.us');
 
@@ -233,8 +235,8 @@ class MessageHandler {
 
             logger.messageReceived(session.accountName, name, isGroup);
 
-            // Marca como lido
-            await chat.sendSeen();
+            // Marca como visto + delay curto
+            try { await chat.sendSeen(); } catch (e) { logger.warn(session.accountName, `sendSeen falhou: ${e.message}`); }
             await delay(2000);
 
             // Obtém comportamento humano com configurações da conta

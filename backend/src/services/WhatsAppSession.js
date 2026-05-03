@@ -208,7 +208,10 @@ class WhatsAppSession extends EventEmitter {
         }
 
         if (connection === 'connecting') {
-            this.status = 'connecting';
+            // Só marca 'connecting' se ainda não conectou. Baileys oscila durante reconexões
+            // internas — não queremos derrubar o status 'ready' que destrava sendMessage.
+            if (this.status !== 'ready') this.status = 'connecting';
+            logger.info(this.accountName, 'Baileys: connecting...');
         }
 
         if (connection === 'open') {
@@ -255,10 +258,20 @@ class WhatsAppSession extends EventEmitter {
     }
 
     async _onMessagesUpsert({ messages, type }) {
-        if (type !== 'notify') return;
+        logger.info(this.accountName, `📥 messages.upsert (type=${type}, count=${messages ? messages.length : 0})`);
+        if (type !== 'notify') {
+            logger.debug(this.accountName, `⏭️  ignorando upsert type=${type}`);
+            return;
+        }
         for (const m of messages) {
-            if (!m || !m.message) continue;
-            if (m.key && m.key.fromMe) continue;
+            if (!m || !m.message) {
+                logger.debug(this.accountName, '⏭️  msg sem .message (provável protocol/notification)');
+                continue;
+            }
+            if (m.key && m.key.fromMe) {
+                logger.debug(this.accountName, `⏭️  fromMe (jid=${m.key.remoteJid})`);
+                continue;
+            }
             const from = m.key.remoteJid;
             const body = extractText(m);
             const adapted = {
@@ -270,6 +283,7 @@ class WhatsAppSession extends EventEmitter {
                 hasMedia: hasMediaIn(m),
                 _raw: m
             };
+            logger.info(this.accountName, `📨 nova msg de ${from} pushName="${adapted.pushName}" body="${(body || '').slice(0, 60)}" hasMedia=${adapted.hasMedia}`);
             this.stats.messagesReceived++;
             this.stats.lastActivity = Date.now();
             this.stats.uniqueContacts.add(from);
@@ -294,7 +308,8 @@ class WhatsAppSession extends EventEmitter {
     }
 
     _ensureReady() {
-        if (this.status !== 'ready' || !this.sock) throw new Error('Cliente não está pronto');
+        if (!this.sock) throw new Error('Cliente não está pronto (sem socket)');
+        if (this.status !== 'ready') throw new Error(`Cliente não está pronto (status=${this.status})`);
     }
 
     async _sendCompat(jid, content, opts = {}) {
