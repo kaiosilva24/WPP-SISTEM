@@ -3,9 +3,11 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const axios = require('axios');
 const db = require('../database/DatabaseManager');
 const sessionManager = require('../services/SessionManager');
 const messageTemplates = require('../utils/messageTemplates');
+const logger = require('../utils/logger');
 const { requireAuth, requireCustomer, requireActiveSubscription } = require('../middleware/auth');
 
 // Todas as rotas de accounts exigem cliente autenticado com assinatura válida
@@ -239,6 +241,41 @@ router.post('/:id/messages/seed', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/**
+ * Dispara um webhook (lookup pelo id no schema do tenant) e aguarda resposta.
+ * Usado em /resume pra rodar ações tipo "trocar IP do proxy" ANTES de subir a sessão.
+ * Fire-and-await com timeout. Erros NÃO impedem a continuação do resume.
+ */
+async function fireAccountWebhook(req, account, webhookId) {
+    try {
+        const r = await tdb(req)._run('SELECT * FROM webhooks WHERE id = $1', [webhookId]);
+        const wh = r.rows[0];
+        if (!wh) {
+            logger.warn(account.name, `webhook_id=${webhookId} não encontrado, pulando`);
+            return { success: false, error: 'webhook não encontrado' };
+        }
+        const cfg = {
+            method: (wh.method || 'GET').toUpperCase(),
+            url: wh.url,
+            timeout: 15000,
+            validateStatus: () => true
+        };
+        if (wh.headers) cfg.headers = wh.headers;
+        if (wh.body && cfg.method !== 'GET') cfg.data = wh.body;
+
+        logger.info(account.name, `🔗 disparando webhook "${wh.name}" (${cfg.method} ${cfg.url}) antes de retomar`);
+        const resp = await axios(cfg);
+        const ok = resp.status >= 200 && resp.status < 300;
+        logger.info(account.name, `🔗 webhook respondeu status=${resp.status} (${ok ? 'OK' : 'falhou — continuando mesmo assim'})`);
+        // Pequeno delay pra propagar mudanças (ex: rotação de IP do proxy)
+        await new Promise((r) => setTimeout(r, 2000));
+        return { success: ok, status: resp.status };
+    } catch (e) {
+        logger.warn(account.name, `🔗 webhook falhou (continuando): ${e.message}`);
+        return { success: false, error: e.message };
+    }
+}
+
 router.post('/:id/start', async (req, res) => {
     try {
         const { visible } = req.body || {};
@@ -253,6 +290,55 @@ router.post('/:id/start', async (req, res) => {
         }
         await sessionManager.createSession(tid(req), accountId, account.name, { visible });
         res.json({ message: 'Sessão iniciada' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * Pausa a conta: destrói a sessão Baileys e marca status='paused' no DB
+ * (persiste entre restarts — não auto-conecta no boot).
+ */
+router.post('/:id/pause', async (req, res) => {
+    try {
+        const accountId = parseInt(req.params.id, 10);
+        const account = await tdb(req).getAccount(accountId);
+        if (!account) return res.status(404).json({ error: 'Conta não encontrada' });
+
+        await sessionManager.destroySession(tid(req), accountId);
+        await tdb(req).updateAccountStatus(accountId, 'paused');
+
+        logger.info(account.name, '⏸️  conta pausada (sessão destruída, status=paused)');
+        res.json({ message: 'Conta pausada' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * Retoma a conta. Se houver `webhook_id` configurado em account_configs,
+ * dispara o webhook ANTES de subir a sessão (útil pra rotacionar IP de proxy
+ * em "modo avião" antes de reconectar).
+ */
+router.post('/:id/resume', async (req, res) => {
+    try {
+        const accountId = parseInt(req.params.id, 10);
+        const account = await tdb(req).getAccount(accountId);
+        if (!account) return res.status(404).json({ error: 'Conta não encontrada' });
+
+        // webhook_id vem do JOIN com account_configs em getAccount
+        const webhookId = account.webhook_id != null ? Number(account.webhook_id) : null;
+        let webhookResult = null;
+        if (webhookId) {
+            webhookResult = await fireAccountWebhook(req, account, webhookId);
+        }
+
+        // Garantia: se houver sessão ativa antiga, destrói antes
+        const existing = sessionManager.getSession(tid(req), accountId);
+        if (existing) {
+            await sessionManager.destroySession(tid(req), accountId);
+            await new Promise((r) => setTimeout(r, 1500));
+        }
+        await sessionManager.createSession(tid(req), accountId, account.name, {});
+
+        logger.info(account.name, '▶️  conta retomada' + (webhookId ? ` (webhook ${webhookId} disparado)` : ''));
+        res.json({ message: 'Conta retomada', webhook: webhookResult });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
