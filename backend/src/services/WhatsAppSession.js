@@ -23,16 +23,35 @@ function normalizeJid(jid) {
     return jid;
 }
 
+function unwrapMessage(m) {
+    if (!m) return m;
+    if (m.ephemeralMessage && m.ephemeralMessage.message) return unwrapMessage(m.ephemeralMessage.message);
+    if (m.viewOnceMessage && m.viewOnceMessage.message) return unwrapMessage(m.viewOnceMessage.message);
+    if (m.viewOnceMessageV2 && m.viewOnceMessageV2.message) return unwrapMessage(m.viewOnceMessageV2.message);
+    if (m.viewOnceMessageV2Extension && m.viewOnceMessageV2Extension.message) return unwrapMessage(m.viewOnceMessageV2Extension.message);
+    if (m.documentWithCaptionMessage && m.documentWithCaptionMessage.message) return unwrapMessage(m.documentWithCaptionMessage.message);
+    return m;
+}
+
 function extractText(msg) {
     if (!msg || !msg.message) return '';
-    const m = msg.message;
+    const m = unwrapMessage(msg.message);
+    if (!m) return '';
     if (m.conversation) return m.conversation;
     if (m.extendedTextMessage && m.extendedTextMessage.text) return m.extendedTextMessage.text;
     if (m.imageMessage && m.imageMessage.caption) return m.imageMessage.caption;
     if (m.videoMessage && m.videoMessage.caption) return m.videoMessage.caption;
     if (m.documentMessage && m.documentMessage.caption) return m.documentMessage.caption;
     if (m.buttonsResponseMessage && m.buttonsResponseMessage.selectedDisplayText) return m.buttonsResponseMessage.selectedDisplayText;
+    if (m.listResponseMessage && m.listResponseMessage.title) return m.listResponseMessage.title;
+    if (m.templateButtonReplyMessage && m.templateButtonReplyMessage.selectedDisplayText) return m.templateButtonReplyMessage.selectedDisplayText;
     return '';
+}
+
+function hasMediaIn(msg) {
+    if (!msg || !msg.message) return false;
+    const m = unwrapMessage(msg.message);
+    return !!(m && (m.imageMessage || m.videoMessage || m.audioMessage || m.documentMessage || m.stickerMessage));
 }
 
 function mediaTypeFromExt(filename) {
@@ -245,8 +264,10 @@ class WhatsAppSession extends EventEmitter {
             const adapted = {
                 from,
                 body,
+                pushName: m.pushName || null,
+                participant: m.key.participant || null,
                 timestamp: typeof m.messageTimestamp === 'number' ? m.messageTimestamp : Number(m.messageTimestamp || 0),
-                hasMedia: !!(m.message.imageMessage || m.message.videoMessage || m.message.audioMessage || m.message.documentMessage || m.message.stickerMessage),
+                hasMedia: hasMediaIn(m),
                 _raw: m
             };
             this.stats.messagesReceived++;
@@ -338,20 +359,28 @@ class WhatsAppSession extends EventEmitter {
 
     /**
      * Compat: retorna um proxy de "chat" com sendSeen / sendStateTyping.
+     * Resolve nome de grupo via groupMetadata quando aplicável.
      */
     async getChat(chatId) {
         const jid = normalizeJid(chatId);
         const sock = this.sock;
         const accountName = this.accountName;
+        const isGroup = jid.endsWith('@g.us');
+
+        let groupName = null;
+        if (isGroup) {
+            try {
+                const meta = await sock.groupMetadata(jid);
+                groupName = (meta && meta.subject) || null;
+            } catch (_) {}
+        }
+
         return {
             id: { _serialized: jid },
+            name: groupName,
+            isGroup,
             sendSeen: async () => {
-                try {
-                    // sem o key da última mensagem só dá pra mandar presença
-                    await sock.sendPresenceUpdate('available', jid);
-                } catch (e) {
-                    logger.warn(accountName, `sendSeen falhou: ${e.message}`);
-                }
+                try { await sock.sendPresenceUpdate('available', jid); } catch (_) {}
             },
             sendStateTyping: async () => {
                 try { await sock.sendPresenceUpdate('composing', jid); } catch (_) {}
@@ -362,7 +391,6 @@ class WhatsAppSession extends EventEmitter {
             clearState: async () => {
                 try { await sock.sendPresenceUpdate('paused', jid); } catch (_) {}
             },
-            // Stub: Baileys não tem fetch de unreads sem store. Devolve [].
             fetchMessages: async () => []
         };
     }

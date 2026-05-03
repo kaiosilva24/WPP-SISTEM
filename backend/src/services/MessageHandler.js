@@ -121,32 +121,31 @@ class MessageHandler {
     }
 
     /**
-     * Obtém mensagem personalizada da conta ou usa padrão
+     * Obtém mensagem personalizada da conta (tenant-scoped) ou cai pra templates padrão.
+     * Em qualquer falha, sempre retorna um template — nunca lança, pra não silenciar a resposta.
      */
     async getResponseMessage(session, contactId, name, isGroup, isFirstInteraction) {
-        // Tenta obter mensagens personalizadas do banco
         const messageType = isGroup ? 'group' : (isFirstInteraction ? 'first' : 'followup');
-        const customMessages = await db.getAccountMessages(session.accountId, messageType);
 
-        if (customMessages && customMessages.length > 0) {
-            // Usa mensagem personalizada aleatória
-            const randomMsg = customMessages[Math.floor(Math.random() * customMessages.length)];
-            const firstName = name.split(' ')[0];
-
-            // Substitui placeholders
-            return randomMsg.message_text
-                .replace('{nome}', firstName)
-                .replace('{grupo}', name);
+        try {
+            if (session.tenantId) {
+                const tdb = db.tenant(session.tenantId);
+                const customMessages = await tdb.getAccountMessages(session.accountId, messageType);
+                if (customMessages && customMessages.length > 0) {
+                    const randomMsg = customMessages[Math.floor(Math.random() * customMessages.length)];
+                    const firstName = (name || 'Cliente').split(' ')[0];
+                    return randomMsg.message_text
+                        .replace('{nome}', firstName)
+                        .replace('{grupo}', name || 'Grupo');
+                }
+            }
+        } catch (e) {
+            logger.warn(session.accountName, `Falha ao buscar mensagens custom (caindo pra templates): ${e.message}`);
         }
 
-        // Usa mensagens padrão
-        if (isGroup) {
-            return getGroupGreeting(name, contactId);
-        } else if (isFirstInteraction) {
-            return getFirstResponse(name, contactId);
-        } else {
-            return getFollowUpResponse(name, contactId);
-        }
+        if (isGroup) return getGroupGreeting(name || 'Grupo', contactId);
+        if (isFirstInteraction) return getFirstResponse(name || 'Cliente', contactId);
+        return getFollowUpResponse(name || 'Cliente', contactId);
     }
 
     /**
@@ -171,8 +170,8 @@ class MessageHandler {
                 return;
             }
 
-            // Processa mensagem normal
-            await this.processNormalMessage(session, contactId);
+            // Processa mensagem normal (passa o objeto message pra usar pushName)
+            await this.processNormalMessage(session, contactId, message);
 
         } catch (error) {
             logger.error(session.accountName, `Erro ao processar mensagem de ${contactId}: ${error.message}`);
@@ -213,19 +212,23 @@ class MessageHandler {
     /**
      * Processa mensagem normal
      */
-    async processNormalMessage(session, contactId) {
+    async processNormalMessage(session, contactId, message = null) {
         try {
             const config = this.getAccountConfig(session);
             const chat = await session.getChat(contactId);
             const isGroup = contactId.includes('@g.us');
 
-            // Obtém nome do contato/grupo
+            // Nome do contato/grupo: prioriza dados que vieram com a mensagem (rápido e confiável)
             let name = 'Cliente';
             if (isGroup) {
-                name = chat.name || 'Grupo';
+                name = (chat && chat.name) || 'Grupo';
+            } else if (message && message.pushName) {
+                name = message.pushName;
             } else {
-                const contact = await session.getContact(contactId);
-                name = contact.pushname || contact.name || 'Cliente';
+                try {
+                    const contact = await session.getContact(contactId);
+                    name = contact.pushname || contact.name || 'Cliente';
+                } catch (_) {}
             }
 
             logger.messageReceived(session.accountName, name, isGroup);
@@ -281,10 +284,16 @@ class MessageHandler {
             this.interactions.set(contactId, interactionCount + 1);
             this.lastMessageTime.set(contactId, Date.now());
 
-            // Atualiza estatísticas no banco
-            await db.updateStats(session.accountId, {
-                unique_contacts: this.interactions.size
-            });
+            // Atualiza estatísticas no banco (tenant-scoped, nunca quebra o fluxo)
+            try {
+                if (session.tenantId) {
+                    await db.tenant(session.tenantId).updateStats(session.accountId, {
+                        unique_contacts: this.interactions.size
+                    });
+                }
+            } catch (e) {
+                logger.warn(session.accountName, `Falha ao atualizar stats: ${e.message}`);
+            }
 
         } catch (error) {
             logger.error(session.accountName, `Erro ao processar mensagem: ${error.message}`);
