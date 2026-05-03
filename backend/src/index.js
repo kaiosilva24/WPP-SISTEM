@@ -73,7 +73,7 @@ async function expirySweep() {
 }
 
 // Marca de versão usada no boot pra confirmar qual build está realmente rodando.
-const BUILD_TAG = 'audio-ogg-opus-mobile-2026-05-03f';
+const BUILD_TAG = 'ptt-waveform-config-persist-2026-05-03g';
 
 async function main() {
     try {

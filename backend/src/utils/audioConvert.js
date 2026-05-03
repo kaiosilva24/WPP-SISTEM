@@ -90,4 +90,23 @@ async function ensureOggOpus(srcPath) {
     return dest;
 }
 
-module.exports = { ensureOggOpus, isFFmpegAvailable };
+/**
+ * Retorna a duração do áudio em segundos (ou null se não conseguir).
+ * Usa ffprobe (vem com o ffmpeg). Se não houver ffprobe, retorna null silenciosamente.
+ */
+function getAudioDuration(filePath) {
+    return new Promise((resolve) => {
+        execFile('ffprobe', [
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            filePath
+        ], { timeout: 5000 }, (err, stdout) => {
+            if (err) return resolve(null);
+            const dur = parseFloat(String(stdout).trim());
+            resolve(Number.isFinite(dur) && dur > 0 ? dur : null);
+        });
+    });
+}
+
+module.exports = { ensureOggOpus, isFFmpegAvailable, getAudioDuration };

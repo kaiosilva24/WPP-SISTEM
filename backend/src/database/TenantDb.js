@@ -107,11 +107,54 @@ class TenantDb {
 
     async updateAccountConfig(id, config) {
         const allowed = [
+            // proxy
             'proxy_enabled','proxy_ip','proxy_port','proxy_username','proxy_password',
-            'min_read_delay','max_read_delay','min_typing_delay','max_typing_delay',
-            'min_response_delay','max_response_delay','min_message_interval',
-            'ignore_probability','media_enabled','media_interval',
-            'global_private_delay_minutes','global_group_delay_minutes'
+            // delays gerais
+            'min_read_delay','max_read_delay',
+            'min_typing_delay','max_typing_delay',
+            'min_response_delay','max_response_delay',
+            'min_message_interval','max_message_interval',
+            'ignore_probability',
+            'media_enabled','media_interval',
+            // pausas globais
+            'global_private_delay_minutes','global_group_delay_minutes',
+            // followup (privado, depois da 1ª)
+            'min_followup_read_delay','max_followup_read_delay',
+            'min_followup_typing_delay','max_followup_typing_delay',
+            'min_followup_response_delay','max_followup_response_delay',
+            'min_followup_interval','max_followup_interval',
+            'followup_audio_enabled',
+            'followup_min_recording_delay','followup_max_recording_delay',
+            'followup_media_enabled','followup_media_interval',
+            'min_followup_audio_listen_delay','max_followup_audio_listen_delay',
+            'followup_docs_enabled','followup_docs_interval',
+            // grupos
+            'min_group_read_delay','max_group_read_delay',
+            'min_group_typing_delay','max_group_typing_delay',
+            'min_group_response_delay','max_group_response_delay',
+            'min_group_interval','max_group_interval',
+            'group_audio_enabled',
+            'group_min_recording_delay','group_max_recording_delay',
+            'group_media_enabled','group_media_interval',
+            'min_group_audio_listen_delay','max_group_audio_listen_delay',
+            'group_docs_enabled','group_docs_interval',
+            // escuta de áudio
+            'min_audio_listen_delay','max_audio_listen_delay',
+            // pausas baseadas em respostas
+            'pause_after_n_responses','pause_duration_minutes',
+            // auto-warm
+            'auto_warm_enabled','auto_warm_idle_minutes',
+            'auto_warm_delay_min','auto_warm_delay_max',
+            // standby
+            'standby_enabled',
+            'standby_min_interval','standby_max_interval',
+            'standby_min_duration','standby_max_duration',
+            'standby_watch_status_enabled','standby_watch_status_prob',
+            'standby_watch_status_min_contacts','standby_watch_status_max_contacts',
+            'standby_watch_status_min_delay','standby_watch_status_max_delay',
+            // vínculos / agendamento
+            'proxy_group_id','webhook_id',
+            'scheduled_start_time','scheduled_end_time'
         ];
         const fields = [];
         const values = [];

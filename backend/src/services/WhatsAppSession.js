@@ -14,7 +14,7 @@ const {
 const logger = require('../utils/logger');
 const db = require('../database/DatabaseManager');
 const { usePostgresAuthState } = require('./baileysAuthState');
-const { ensureOggOpus, isFFmpegAvailable } = require('../utils/audioConvert');
+const { ensureOggOpus, isFFmpegAvailable, getAudioDuration } = require('../utils/audioConvert');
 
 const baileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL || 'silent' });
 
@@ -432,13 +432,37 @@ class WhatsAppSession extends EventEmitter {
 
             if (oggPath) {
                 const oggBuf = fs.readFileSync(oggPath);
+                // Duração via ffprobe pra mostrar tempo no balão antes do download
+                let seconds;
+                try {
+                    const dur = await getAudioDuration(oggPath);
+                    if (dur) seconds = Math.max(1, Math.round(dur));
+                } catch (_) {}
+
+                // Waveform: 64 amostras (0-100) representando amplitude. Sem isso, o
+                // WhatsApp mobile pode renderizar o áudio como "arquivo" em vez de voice
+                // note autêntica. Como o cálculo real exigiria decode PCM, geramos um
+                // padrão pseudo-aleatório suave que parece voz humana.
+                const waveform = Buffer.alloc(64);
+                let prev = 50;
+                for (let i = 0; i < 64; i++) {
+                    // walk: oscila ±25 em torno do anterior, clampado em [10, 100]
+                    prev += Math.floor((Math.random() - 0.5) * 50);
+                    if (prev < 10) prev = 10;
+                    if (prev > 100) prev = 100;
+                    waveform[i] = prev;
+                }
+
                 logger.info(this.accountName,
-                    `🎵 mídia → ${jid}: ${filename} → ${path.basename(oggPath)} (kind=audio, PTT=true, mime=audio/ogg;codecs=opus)`);
-                await this.sock.sendMessage(jid, {
+                    `🎵 mídia → ${jid}: ${filename} → ${path.basename(oggPath)} (kind=audio, PTT=true, mime=audio/ogg;codecs=opus, seconds=${seconds || '?'}, waveform=64b)`);
+                const audioPayload = {
                     audio: oggBuf,
                     mimetype: 'audio/ogg; codecs=opus',
-                    ptt: true
-                });
+                    ptt: true,
+                    waveform
+                };
+                if (seconds) audioPayload.seconds = seconds;
+                await this.sock.sendMessage(jid, audioPayload);
             } else {
                 // Fallback: não-PTT (some mobile clients accept; PC sempre toca)
                 const buf = fs.readFileSync(filePath);
