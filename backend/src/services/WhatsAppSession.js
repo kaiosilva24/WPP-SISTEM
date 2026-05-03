@@ -615,7 +615,42 @@ class WhatsAppSession extends EventEmitter {
         };
     }
 
+    /**
+     * Fecha o socket e libera recursos LOCAIS, MAS preserva as credenciais
+     * persistidas — assim a conta pode reconectar depois sem QR (pause/resume,
+     * stop/start, restart, etc.).
+     *
+     * IMPORTANTE: NÃO chama `sock.logout()` porque isso INVALIDA a sessão no
+     * servidor do WhatsApp (equivalente a "Desconectar" no app), o que faria
+     * a próxima reconexão receber `reason=401 (loggedOut)` e o handler limpar
+     * as creds, exigindo novo QR.
+     */
     async destroy() {
+        try {
+            this._intentionalClose = true;
+            if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+            if (this.sock) {
+                // removeAllListeners ANTES de end pra evitar que o handler de
+                // 'connection.update' veja o close e tente reconectar/clearAll.
+                try { this.sock.ev.removeAllListeners(); } catch (_) {}
+                try { this.sock.end(undefined); } catch (_) {}
+                this.sock = null;
+            }
+            this.status = 'destroyed';
+            this.qrCode = null;
+            logger.success(this.accountName, 'Sessão destruída (creds preservadas pra reconexão)');
+        } catch (error) {
+            logger.error(this.accountName, `Erro ao destruir sessão: ${error.message}`);
+            this.status = 'destroyed';
+        }
+    }
+
+    /**
+     * Logout PERMANENTE: chama `sock.logout()` (invalida no servidor do WhatsApp)
+     * E limpa as credenciais persistidas no DB. Use APENAS quando a conta vai
+     * ser DELETADA do sistema — depois disso é necessário escanear QR de novo.
+     */
+    async logout() {
         try {
             this._intentionalClose = true;
             if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
@@ -625,11 +660,12 @@ class WhatsAppSession extends EventEmitter {
                 try { this.sock.end(undefined); } catch (_) {}
                 this.sock = null;
             }
+            try { if (this._authState) await this._authState.clearAll(); } catch (_) {}
             this.status = 'destroyed';
             this.qrCode = null;
-            logger.success(this.accountName, 'Sessão destruída');
+            logger.warn(this.accountName, 'Sessão deslogada permanentemente (creds apagadas)');
         } catch (error) {
-            logger.error(this.accountName, `Erro ao destruir sessão: ${error.message}`);
+            logger.error(this.accountName, `Erro no logout: ${error.message}`);
             this.status = 'destroyed';
         }
     }

@@ -73,7 +73,7 @@ async function expirySweep() {
 }
 
 // Marca de versão usada no boot pra confirmar qual build está realmente rodando.
-const BUILD_TAG = 'pause-resume-webhook-2026-05-03j';
+const BUILD_TAG = 'pause-sem-logout-preserva-creds-2026-05-03k';
 
 async function main() {
     try {

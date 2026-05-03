@@ -385,7 +385,14 @@ router.put('/:id/mode', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
     try {
-        await sessionManager.destroySession(tid(req), parseInt(req.params.id, 10));
+        const accountId = parseInt(req.params.id, 10);
+        // DELETE de conta = logout PERMANENTE (invalida no WhatsApp + apaga creds).
+        // Pra pause/stop/restart, usamos destroy() simples que preserva creds.
+        const session = sessionManager.getSession(tid(req), accountId);
+        if (session && typeof session.logout === 'function') {
+            try { await session.logout(); } catch (_) {}
+        }
+        await sessionManager.destroySession(tid(req), accountId);
         await tdb(req).deleteAccount(req.params.id);
         res.status(204).send();
     } catch (e) { res.status(500).json({ error: e.message }); }
