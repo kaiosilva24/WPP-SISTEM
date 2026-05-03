@@ -73,7 +73,7 @@ async function expirySweep() {
 }
 
 // Marca de versão usada no boot pra confirmar qual build está realmente rodando.
-const BUILD_TAG = 'ptt-waveform-config-persist-2026-05-03g';
+const BUILD_TAG = 'ffmpeg-static-bundled-2026-05-03h';
 
 async function main() {
     try {

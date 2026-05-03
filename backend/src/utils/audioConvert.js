@@ -12,15 +12,40 @@ const { execFile } = require('child_process');
  *   ao lado do original. Re-uso instantâneo nas próximas chamadas.
  * - Cache é prefixado com `.` (dot) — nosso `_collectMediaCandidates` já ignora
  *   arquivos que começam com `.`, então o cache não vira candidato pro sorteio.
+ *
+ * O binário do ffmpeg vem do pacote npm `ffmpeg-static` (~70MB no node_modules
+ * com binário pré-compilado pra Linux/macOS/Windows). Isso elimina dependência
+ * do `APT=ffmpeg` do Discloud, que não estava sendo aplicado.
  */
 
-let _ffmpegCheck = null;
+let _ffmpegPath = null;
+function getFfmpegPath() {
+    if (_ffmpegPath) return _ffmpegPath;
+    try {
+        const p = require('ffmpeg-static');
+        if (p && fs.existsSync(p)) {
+            _ffmpegPath = p;
+            return p;
+        }
+    } catch (_) {}
+    // Fallback: ffmpeg do PATH do sistema (desenvolvimento local)
+    _ffmpegPath = 'ffmpeg';
+    return _ffmpegPath;
+}
 
+let _ffmpegCheck = null;
 function isFFmpegAvailable() {
     if (_ffmpegCheck !== null) return _ffmpegCheck;
     _ffmpegCheck = new Promise((resolve) => {
-        execFile('ffmpeg', ['-version'], { timeout: 5000 }, (err) => {
-            resolve(!err);
+        const ffmpeg = getFfmpegPath();
+        execFile(ffmpeg, ['-version'], { timeout: 5000 }, (err) => {
+            if (err) {
+                console.warn(`[audioConvert] ffmpeg não disponível em "${ffmpeg}": ${err.message}`);
+                resolve(false);
+            } else {
+                console.log(`[audioConvert] ffmpeg disponível em: ${ffmpeg}`);
+                resolve(true);
+            }
         });
     });
     return _ffmpegCheck;
@@ -28,7 +53,7 @@ function isFFmpegAvailable() {
 
 function _runFfmpeg(args, timeoutMs = 60000) {
     return new Promise((resolve, reject) => {
-        execFile('ffmpeg', args, { timeout: timeoutMs }, (err, stdout, stderr) => {
+        execFile(getFfmpegPath(), args, { timeout: timeoutMs }, (err, stdout, stderr) => {
             if (err) {
                 err.stderr = stderr;
                 reject(err);
@@ -92,20 +117,26 @@ async function ensureOggOpus(srcPath) {
 
 /**
  * Retorna a duração do áudio em segundos (ou null se não conseguir).
- * Usa ffprobe (vem com o ffmpeg). Se não houver ffprobe, retorna null silenciosamente.
+ *
+ * Como `ffmpeg-static` NÃO inclui o ffprobe, usamos o próprio ffmpeg em modo
+ * "null muxer" lendo o input pra fazer ele imprimir Duration no stderr, e
+ * parseamos. Funciona com qualquer ffmpeg moderno.
  */
 function getAudioDuration(filePath) {
     return new Promise((resolve) => {
-        execFile('ffprobe', [
-            '-v', 'error',
-            '-show_entries', 'format=duration',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            filePath
-        ], { timeout: 5000 }, (err, stdout) => {
-            if (err) return resolve(null);
-            const dur = parseFloat(String(stdout).trim());
-            resolve(Number.isFinite(dur) && dur > 0 ? dur : null);
-        });
+        execFile(getFfmpegPath(), ['-i', filePath, '-f', 'null', '-'],
+            { timeout: 10000 }, (err, _stdout, stderr) => {
+                // ffmpeg nesse modo retorna exit-code != 0 (porque output é null), mas
+                // ainda imprime o Duration no stderr. Não tratamos err como fatal.
+                const text = String(stderr || '');
+                const m = text.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+                if (!m) return resolve(null);
+                const h = parseInt(m[1], 10) || 0;
+                const mn = parseInt(m[2], 10) || 0;
+                const s = parseFloat(m[3]) || 0;
+                const dur = h * 3600 + mn * 60 + s;
+                resolve(dur > 0 ? dur : null);
+            });
     });
 }
 
