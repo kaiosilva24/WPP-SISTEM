@@ -149,4 +149,16 @@ router.post('/users/:id/reset-password', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/**
+ * Reseta todas as pausas de contatos de um tenant
+ * POST /admin/tenants/:tenantId/reset-pauses
+ */
+router.post('/tenants/:tenantId/reset-pauses', async (req, res) => {
+    try {
+        const tdb = db.tenant(req.params.tenantId);
+        const count = await tdb.resetAllPauses();
+        res.json({ ok: true, resetCount: count });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;

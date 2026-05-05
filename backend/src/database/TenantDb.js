@@ -425,6 +425,17 @@ class TenantDb {
         return r.rowCount;
     }
 
+    async resetAllPauses() {
+        const r = await this._run(
+            `UPDATE dispatch_contacts
+                SET status = 'pending', pause_until = NULL
+              WHERE pause_until IS NOT NULL
+              RETURNING id`,
+            []
+        );
+        return r.rowCount;
+    }
+
     async findActiveContactForAccount(accountId, phone) {
         const r = await this._run(
             `SELECT dc.*, c.id AS campaign_id_join, c.auto_reply_enabled, c.pause_on_reply_seconds, c.status AS campaign_status

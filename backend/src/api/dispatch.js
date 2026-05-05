@@ -203,4 +203,15 @@ router.get('/inbox', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/**
+ * Reseta todas as pausas de contatos do usuário
+ * POST /api/dispatch/reset-pauses
+ */
+router.post('/reset-pauses', async (req, res) => {
+    try {
+        const count = await tdb(req).resetAllPauses();
+        res.json({ ok: true, resetCount: count, message: `${count} contatos desbloqueados` });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
