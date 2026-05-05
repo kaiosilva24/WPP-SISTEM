@@ -238,6 +238,17 @@ class WhatsAppSession extends EventEmitter {
 
             logger.info(this.accountName, `Conectado como: ${this._self.name || 'sem nome'} (${userPart})`);
 
+            // FIX (resume bug): após reconexão "fria" (pause/resume, restart), o WhatsApp
+            // às vezes não re-pusha messages.upsert em tempo real até o cliente sinalizar
+            // presença. Como `markOnlineOnConnect: false` mantém o device em offline silencioso,
+            // forçamos available aqui pra destravar o recebimento de mensagens novas.
+            try {
+                await this.sock.sendPresenceUpdate('available');
+                logger.info(this.accountName, '🟢 presença available enviada após connect (destrava recebimento)');
+            } catch (e) {
+                logger.warn(this.accountName, `presença available falhou (continuando): ${e.message}`);
+            }
+
             // emite no formato esperado pelo SessionManager (info.wid.user)
             this.emit('authenticated');
             this.emit('ready', { wid: { user: userPart }, pushname: this._self.name });

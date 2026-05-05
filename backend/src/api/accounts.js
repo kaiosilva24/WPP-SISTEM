@@ -316,6 +316,55 @@ router.post('/:id/pause', async (req, res) => {
  * dispara o webhook ANTES de subir a sessão (útil pra rotacionar IP de proxy
  * em "modo avião" antes de reconectar).
  */
+/**
+ * Aguarda a sessão de um (tenantId, accountId) chegar em status='ready' ou 'qr',
+ * com timeout. Resolve com { status, reason } ou rejeita em timeout/erro de sessão.
+ * Usado pelo /resume pra só responder ao front depois que a reconexão foi confirmada.
+ */
+function waitSessionReady(tenantId, accountId, timeoutMs = 60000) {
+    return new Promise((resolve, reject) => {
+        const checkNow = () => {
+            const s = sessionManager.getSession(tenantId, accountId);
+            if (s && s.status === 'ready') return { ok: true, status: 'ready' };
+            if (s && s.status === 'qr')    return { ok: true, status: 'qr' };
+            if (s && s.status === 'error') return { ok: false, status: 'error' };
+            return null;
+        };
+
+        const initial = checkNow();
+        if (initial) {
+            return initial.ok
+                ? resolve({ status: initial.status })
+                : reject(new Error(`Sessão entrou em estado de erro durante resume`));
+        }
+
+        const onReady = ({ tenantId: t, accountId: a }) => {
+            if (t === tenantId && a === accountId) cleanup(resolve, { status: 'ready' });
+        };
+        const onQr = ({ tenantId: t, accountId: a }) => {
+            if (t === tenantId && a === accountId) cleanup(resolve, { status: 'qr' });
+        };
+        const onError = ({ tenantId: t, accountId: a, error }) => {
+            if (t === tenantId && a === accountId) cleanup(reject, new Error(`Sessão erro: ${error && error.message || error}`));
+        };
+        const timer = setTimeout(() => {
+            cleanup(reject, new Error(`Timeout aguardando sessão chegar em ready/qr (${timeoutMs}ms)`));
+        }, timeoutMs);
+
+        function cleanup(fn, payload) {
+            clearTimeout(timer);
+            sessionManager.removeListener('session:ready', onReady);
+            sessionManager.removeListener('session:qr', onQr);
+            sessionManager.removeListener('session:error', onError);
+            fn(payload);
+        }
+
+        sessionManager.on('session:ready', onReady);
+        sessionManager.on('session:qr', onQr);
+        sessionManager.on('session:error', onError);
+    });
+}
+
 router.post('/:id/resume', async (req, res) => {
     try {
         const accountId = parseInt(req.params.id, 10);
@@ -337,8 +386,27 @@ router.post('/:id/resume', async (req, res) => {
         }
         await sessionManager.createSession(tid(req), accountId, account.name, {});
 
-        logger.info(account.name, '▶️  conta retomada' + (webhookId ? ` (webhook ${webhookId} disparado)` : ''));
-        res.json({ message: 'Conta retomada', webhook: webhookResult });
+        // FIX (resume bug): aguarda a sessão chegar em ready (ou pedir QR) antes de
+        // responder OK. Se ficou preso em "connecting" por 60s ou foi pra 'error',
+        // o front recebe um 504/500 com motivo claro em vez de um falso "retomada".
+        let readyResult = null;
+        try {
+            readyResult = await waitSessionReady(tid(req), accountId, 60000);
+        } catch (waitErr) {
+            logger.warn(account.name, `⚠️  resume não confirmou ready: ${waitErr.message}`);
+            return res.status(504).json({
+                error: 'Conta retomada mas conexão não confirmou em 60s',
+                detail: waitErr.message,
+                webhook: webhookResult
+            });
+        }
+
+        logger.info(account.name, `▶️  conta retomada (status=${readyResult.status})${webhookId ? ` (webhook ${webhookId} disparado)` : ''}`);
+        res.json({
+            message: readyResult.status === 'ready' ? 'Conta retomada' : 'Conta retomada — aguardando QR',
+            status: readyResult.status,
+            webhook: webhookResult
+        });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

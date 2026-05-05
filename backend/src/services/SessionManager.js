@@ -73,7 +73,19 @@ class SessionManager extends EventEmitter {
             });
 
             bucket.set(accountId, session);
-            await session.initialize();
+            try {
+                await session.initialize();
+            } catch (initErr) {
+                // FIX (resume bug): se initialize() falhou (ex.: proxy caiu durante a pausa),
+                // remove a sessão quebrada do bucket. Sem isso, próximas chamadas a
+                // createSession caem no early-return de bucket.has(accountId) e devolvem
+                // o objeto inválido com status='error' e sock=null pra sempre.
+                bucket.delete(accountId);
+                try { await session.destroy(); } catch (_) {}
+                try { await db.tenant(tenantId).updateAccountStatus(accountId, 'error'); } catch (_) {}
+                logger.error(null, `🧹 sessão tenant=${tenantId} acc=${accountId} removida do bucket após falha em initialize()`);
+                throw initErr;
+            }
             return session;
         } catch (error) {
             logger.error(null, `Erro ao criar sessão tenant=${tenantId} acc=${accountName}: ${error.message}`);
