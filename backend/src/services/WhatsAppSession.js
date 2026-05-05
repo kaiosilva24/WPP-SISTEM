@@ -187,7 +187,13 @@ class WhatsAppSession extends EventEmitter {
                 browser: Browsers.macOS('Desktop'),
                 syncFullHistory: false,
                 generateHighQualityLinkPreview: false,
-                markOnlineOnConnect: false,
+                // FIX (resume bug — definitivo): com `markOnlineOnConnect: false`, sessões
+                // ressuscitadas de creds antigas (pause/resume, restart) não recebem
+                // `messages.upsert` mesmo após `sendPresenceUpdate('available')`. Subindo
+                // pra `true` o WhatsApp considera o device totalmente online e re-pusha
+                // as mensagens. Pra aquecimento isso é até MELHOR — humano fica online
+                // de fato, e os delays humanizados ainda evitam parecer bot.
+                markOnlineOnConnect: true,
                 agent,
                 fetchAgent: agent
             });
@@ -302,9 +308,14 @@ class WhatsAppSession extends EventEmitter {
     }
 
     async _onMessagesUpsert({ messages, type }) {
-        // Log inicial em DEBUG (não aparece no painel ao vivo) — Baileys emite muitos
-        // upserts vazios (protocol/recibo/echo) que poluem o log INFO.
-        logger.debug(this.accountName, `📥 messages.upsert (type=${type}, count=${messages ? messages.length : 0})`);
+        // Log: notify/append sobem pra INFO (o que importa pro fluxo de aquecimento);
+        // outros tipos (replace, etc.) ficam em DEBUG pra não poluir.
+        const count = messages ? messages.length : 0;
+        if (type === 'notify' || type === 'append') {
+            logger.info(this.accountName, `📥 messages.upsert (type=${type}, count=${count})`);
+        } else {
+            logger.debug(this.accountName, `📥 messages.upsert (type=${type}, count=${count})`);
+        }
 
         if (type !== 'notify' && type !== 'append') return;
 
