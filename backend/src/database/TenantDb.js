@@ -211,6 +211,21 @@ class TenantDb {
         return r.rowCount;
     }
 
+    /**
+     * Apaga TODA a auth state do Baileys (creds + Signal Protocol sessions/keys/prekeys)
+     * de uma conta. Usado pelo /clear-session quando a sessão criptográfica fica
+     * dessincronizada com o WhatsApp (sintoma: loop de "Bad MAC Error" no log,
+     * mensagens nunca chegam ao messages.upsert). Forçando a apagar e re-escanear
+     * o QR, o Baileys recomeça com creds novas e o problema é resolvido.
+     */
+    async clearAuthState(accountId) {
+        const r = await this._run(
+            'DELETE FROM whatsapp_auth WHERE account_id = $1 RETURNING type',
+            [accountId]
+        );
+        return r.rowCount;
+    }
+
     async updateStats(accountId, stats) {
         const fields = [];
         const values = [];

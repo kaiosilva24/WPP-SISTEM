@@ -478,6 +478,40 @@ router.put('/:id/mode', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/**
+ * POST /api/accounts/:id/clear-session — "Novo QR Code".
+ * Destrói a sessão Baileys ATIVA (sem chamar logout do WhatsApp) e APAGA toda a
+ * auth state persistida (whatsapp_auth do accountId). Isso resolve o loop de
+ * "Bad MAC Error" que acontece quando as Signal sessions ficam dessincronizadas
+ * com o WhatsApp (ex: depois de muitos pause/resume ou de restart com creds antigas).
+ *
+ * Diferente de DELETE /:id, esta rota PRESERVA a conta no painel — só zera o
+ * estado criptográfico. Usuário clica "Iniciar" depois pra gerar QR novo.
+ */
+router.post('/:id/clear-session', async (req, res) => {
+    try {
+        const accountId = parseInt(req.params.id, 10);
+        const account = await tdb(req).getAccount(accountId);
+        if (!account) return res.status(404).json({ error: 'Conta não encontrada' });
+
+        // 1) Mata a sessão em memória (se houver). Não chama logout pra não invalidar
+        //    no servidor do WhatsApp — só queremos limpar o estado local.
+        await sessionManager.destroySession(tid(req), accountId);
+
+        // 2) Apaga TODOS os registros de whatsapp_auth daquela conta.
+        const removed = await tdb(req).clearAuthState(accountId);
+
+        // 3) Marca conta como disconnected pra UI saber que precisa Iniciar de novo
+        await tdb(req).updateAccountStatus(accountId, 'disconnected');
+
+        logger.warn(account.name, `🔄 clear-session: ${removed} entrada(s) de whatsapp_auth apagada(s) — escaneie QR novo pra reconectar`);
+        res.json({
+            message: 'Sessão limpa. Clique Iniciar para gerar QR novo.',
+            removed
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.delete('/:id', async (req, res) => {
     try {
         const accountId = parseInt(req.params.id, 10);
