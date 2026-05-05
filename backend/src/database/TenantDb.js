@@ -191,6 +191,26 @@ class TenantDb {
         await this._run('DELETE FROM account_messages WHERE id = $1', [id]);
     }
 
+    /**
+     * Apaga TODAS as mensagens de uma conta. Usado pelo /messages/seed com force=true
+     * pra realmente recriar (apagar + re-seed) em vez de só anexar duplicatas.
+     * Opcionalmente filtra por messageType ('first' | 'followup' | 'group').
+     */
+    async deleteAllAccountMessages(accountId, messageType = null) {
+        if (messageType) {
+            const r = await this._run(
+                'DELETE FROM account_messages WHERE account_id = $1 AND message_type = $2 RETURNING id',
+                [accountId, messageType]
+            );
+            return r.rowCount;
+        }
+        const r = await this._run(
+            'DELETE FROM account_messages WHERE account_id = $1 RETURNING id',
+            [accountId]
+        );
+        return r.rowCount;
+    }
+
     async updateStats(accountId, stats) {
         const fields = [];
         const values = [];

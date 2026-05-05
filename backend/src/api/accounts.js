@@ -207,7 +207,11 @@ router.delete('/:id/messages/:messageId', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/accounts/:id/messages/seed — popula com templates padrão
+// POST /api/accounts/:id/messages/seed — popula com templates padrão.
+// Body opcional: { force: true, type: 'first'|'followup'|'group' }
+//   - force=false (default): pula se a conta já tem qualquer mensagem
+//   - force=true:  APAGA as mensagens da conta antes de re-seed (pra evitar duplicatas)
+//                  Se `type` for passado, apaga e re-seed só desse bucket.
 router.post('/:id/messages/seed', async (req, res) => {
     try {
         const account = await tdb(req).getAccount(req.params.id);
@@ -215,6 +219,7 @@ router.post('/:id/messages/seed', async (req, res) => {
 
         const accountId = parseInt(req.params.id, 10);
         const force = !!(req.body && req.body.force);
+        const onlyType = req.body && req.body.type ? String(req.body.type) : null;
 
         if (!force) {
             const existing = await tdb(req).getAccountMessages(accountId);
@@ -223,11 +228,27 @@ router.post('/:id/messages/seed', async (req, res) => {
             }
         }
 
-        const buckets = [
+        const allBuckets = [
             { type: 'first', items: messageTemplates.firstResponseTemplates },
             { type: 'followup', items: messageTemplates.followUpTemplates },
             { type: 'group', items: messageTemplates.groupGreetings }
         ];
+        const buckets = onlyType
+            ? allBuckets.filter((b) => b.type === onlyType)
+            : allBuckets;
+
+        // FIX: quando force=true, apaga as mensagens existentes antes de re-seed
+        // pra garantir que o "Recriar com padrão" realmente recria (em vez de só anexar
+        // os novos templates por cima dos antigos, que era o que duplicava o bucket).
+        let deleted = 0;
+        if (force) {
+            if (onlyType) {
+                deleted = await tdb(req).deleteAllAccountMessages(accountId, onlyType);
+            } else {
+                deleted = await tdb(req).deleteAllAccountMessages(accountId);
+            }
+            logger.info(account.name, `🧹 seed force: ${deleted} mensagem(ns) apagada(s)${onlyType ? ` (type=${onlyType})` : ''}`);
+        }
 
         let inserted = 0;
         for (const bucket of buckets) {
@@ -237,7 +258,13 @@ router.post('/:id/messages/seed', async (req, res) => {
             }
         }
 
-        res.json({ inserted });
+        res.json({
+            inserted,
+            deleted,
+            message: force
+                ? `${inserted} mensagens recriadas (${deleted} antigas removidas)`
+                : `${inserted} mensagens inseridas`
+        });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
