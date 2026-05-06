@@ -176,9 +176,35 @@ router.put('/:id/config', async (req, res) => {
     try {
         const account = await tdb(req).getAccount(req.params.id);
         if (!account) return res.status(404).json({ error: 'Conta não encontrada' });
-        await tdb(req).updateAccountConfig(req.params.id, req.body);
+
+        const body = { ...(req.body || {}) };
+
+        // FIX (UX): auto-deriva proxy_group_id da URL do webhook quando o usuário
+        // seleciona um webhook no modal de agendamento. Isso elimina a necessidade
+        // de configurar duas coisas (proxy_group + webhook) — basta escolher o
+        // webhook (ex: "s7"), e o backend extrai host:port da URL pra agrupar
+        // contas que compartilham o mesmo proxy/IP.
+        if (body.webhook_id != null && body.proxy_group_id === undefined) {
+            try {
+                const r = await tdb(req)._run('SELECT url FROM webhooks WHERE id = $1', [body.webhook_id]);
+                if (r.rows[0] && r.rows[0].url) {
+                    const u = new URL(r.rows[0].url);
+                    body.proxy_group_id = `${u.hostname}${u.port ? ':' + u.port : ''}`;
+                    logger.info(account.name, `🔗 proxy_group_id auto-derivado do webhook id=${body.webhook_id}: ${body.proxy_group_id}`);
+                }
+            } catch (e) {
+                logger.warn(account.name, `Falha ao derivar proxy_group_id do webhook: ${e.message}`);
+            }
+        }
+        // Se webhook foi removido, limpa proxy_group_id também (a menos que o user esteja
+        // setando proxy_group_id explicitamente nesta mesma chamada).
+        if (body.webhook_id === null && body.proxy_group_id === undefined) {
+            body.proxy_group_id = null;
+        }
+
+        await tdb(req).updateAccountConfig(req.params.id, body);
         const session = sessionManager.getSession(tid(req), parseInt(req.params.id, 10));
-        if (session) session.updateConfig(req.body);
+        if (session) session.updateConfig(body);
         const updated = await tdb(req).getAccount(req.params.id);
         res.json(updated);
     } catch (e) { res.status(500).json({ error: e.message }); }

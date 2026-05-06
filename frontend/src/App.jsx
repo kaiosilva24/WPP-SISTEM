@@ -2533,14 +2533,13 @@ function App() {
                             </div>
                             <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
                                 <p style={{ color: '#aaa', fontSize: '0.9rem', marginBottom: '16px' }}>
-                                    Selecione qual Proxy esta conta compartilha. Contas com o mesmo Proxy entram em Pausa automaticamente para ceder a vez.
+                                    Selecione o Webhook (Modo Avião) que controla o proxy desta conta. O Grupo Proxy é derivado automaticamente da URL do webhook — contas com o mesmo webhook compartilham proxy e revezam.
                                 </p>
 
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '1px solid #333' }}>
                                             <th style={{ textAlign: 'left', padding: '8px' }}>Conta</th>
-                                            <th style={{ textAlign: 'left', padding: '8px' }}>Grupo Proxy</th>
                                             <th style={{ textAlign: 'left', padding: '8px' }}>Webhook/Modo Avião</th>
                                             <th style={{ textAlign: 'left', padding: '8px' }}>Horário (Início - Fim)</th>
                                             <th style={{ textAlign: 'center', padding: '8px' }}>Agendado</th>
@@ -2571,23 +2570,16 @@ function App() {
                                                 <tr key={acc.id} style={{ borderBottom: '1px solid #222' }}>
                                                     <td style={{ padding: '8px', fontWeight: 'bold' }}>{acc.name}</td>
                                                     <td style={{ padding: '8px' }}>
-                                                    <select value={acc.proxy_group_id || ''} className="form-input" style={{ width: '140px', padding: '6px', fontSize: '0.8rem' }}
-                                                        onChange={(e) => autoSaveScheduleField({ proxy_group_id: e.target.value || null })}>
-                                                        <option value="">-- Nenhum --</option>
-                                                        {[...new Set([
-                                                            ...accounts.map(a => a.proxy_ip ? (a.proxy_port ? `${a.proxy_ip}:${a.proxy_port}` : a.proxy_ip) : null).filter(Boolean),
-                                                            ...accounts.map(a => a.proxy_group_id).filter(id => id && /(\d{1,3}\.){3}\d{1,3}(:\d+)?/.test(id))
-                                                        ])].map(ip => (
-                                                            <option key={ip} value={ip}>{ip}</option>
-                                                        ))}
-                                                    </select>
-                                                    </td>
-                                                    <td style={{ padding: '8px' }}>
                                                     <select value={acc.webhook_id != null ? String(acc.webhook_id) : ''} className="form-input" style={{ width: '160px', padding: '6px', fontSize: '0.8rem' }}
                                                         onChange={(e) => autoSaveScheduleField({ webhook_id: parseInt(e.target.value) || null })}>
                                                         <option value="">-- Nenhum --</option>
                                                         {webhooks.map(w => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
                                                     </select>
+                                                    {acc.proxy_group_id && (
+                                                        <div style={{ color: '#666', fontSize: '0.7rem', marginTop: '2px' }}>
+                                                            proxy: {acc.proxy_group_id}
+                                                        </div>
+                                                    )}
                                                     </td>
                                                     <td style={{ padding: '8px' }}>
                                                         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
