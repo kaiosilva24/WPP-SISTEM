@@ -111,6 +111,7 @@ const TENANT_DDL = (schema) => {
             webhook_id INTEGER,
             scheduled_start_time TEXT,
             scheduled_end_time TEXT,
+            schedule_enabled BOOLEAN DEFAULT FALSE,
             FOREIGN KEY (account_id) REFERENCES ${s}.accounts(id) ON DELETE CASCADE
         )`,
         // Migrações idempotentes para tenants antigos (rodam via syncAllTenantSchemas).
@@ -175,6 +176,7 @@ const TENANT_DDL = (schema) => {
         `ALTER TABLE ${s}.account_configs ADD COLUMN IF NOT EXISTS webhook_id INTEGER`,
         `ALTER TABLE ${s}.account_configs ADD COLUMN IF NOT EXISTS scheduled_start_time TEXT`,
         `ALTER TABLE ${s}.account_configs ADD COLUMN IF NOT EXISTS scheduled_end_time TEXT`,
+        `ALTER TABLE ${s}.account_configs ADD COLUMN IF NOT EXISTS schedule_enabled BOOLEAN DEFAULT FALSE`,
 
         `CREATE TABLE IF NOT EXISTS ${s}.account_messages (
             id SERIAL PRIMARY KEY,

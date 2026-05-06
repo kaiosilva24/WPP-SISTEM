@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const logger = require('./utils/logger');
 const sessionManager = require('./services/SessionManager');
 const messageHandler = require('./services/MessageHandler');
+const scheduler = require('./services/SchedulerService');
 const WebServer = require('./web/server');
 const db = require('./database/DatabaseManager');
 const Tenancy = require('./database/Tenancy');
@@ -114,6 +115,9 @@ async function main() {
         await expirySweep();
         setInterval(expirySweep, 5 * 60 * 1000);
 
+        // Scheduler: pause/resume automático por janela horária (schedule_enabled)
+        scheduler.start();
+
         logger.success(null, 'Backend API iniciado!');
         logger.info(null, `🔗 API: http://localhost:${port}`);
         console.log('\n' + '='.repeat(60));
@@ -122,6 +126,7 @@ async function main() {
 
         process.on('SIGINT', async () => {
             logger.info(null, 'Encerrando...');
+            scheduler.stop();
             await sessionManager.destroyAll();
             await webServer.stop();
             await db.close();

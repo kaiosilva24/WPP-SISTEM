@@ -154,7 +154,7 @@ class TenantDb {
             'standby_watch_status_min_delay','standby_watch_status_max_delay',
             // vínculos / agendamento
             'proxy_group_id','webhook_id',
-            'scheduled_start_time','scheduled_end_time'
+            'scheduled_start_time','scheduled_end_time','schedule_enabled'
         ];
         const fields = [];
         const values = [];
